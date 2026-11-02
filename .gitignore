@@ -1,0 +1,25 @@
+node_modules/
+data/
+.env
+*.log
+tools/
+
+audit-backup/
+.firecrawl/
+private/
+.review/
+evidence/
+test-ui/evidence/
+dist/
+
+# Local secrets and operational state
+.env.*
+!.env.example
+wa-auth/
+creds.json
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
