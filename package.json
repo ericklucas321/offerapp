@@ -1,0 +1,30 @@
+{
+  "name": "offer-machine",
+  "version": "5.0.2",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/app.mjs",
+    "dev": "node --watch src/app.mjs",
+    "test": "node scripts/test.mjs",
+    "test:ui": "node test-ui/run.mjs && node test-ui/action-states.mjs && node test-ui/payment-parser.mjs && node test-ui/review-races.mjs && node test-ui/capture-auto.mjs && node test-ui/automatic.mjs",
+    "check": "node scripts/check.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "format": "prettier src public extension scripts test test-ui/*.mjs --write",
+    "format:check": "prettier src public extension scripts test test-ui/*.mjs --check",
+    "verify": "npm run build:extension && npm run check && npm test && npm run format:check",
+    "build:package": "npm run build:extension && node scripts/build-package.mjs",
+    "test:coverage": "node scripts/coverage.mjs"
+  },
+  "optionalDependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "pino": "9.9.0",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "prettier": "3.9.9"
+  }
+}

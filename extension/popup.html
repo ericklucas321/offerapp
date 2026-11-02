@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+  <meta charset="utf-8" /><title>Capturar ofertas</title
+  ><style>
+    body {
+      width: 340px;
+      padding: 16px;
+      font: 14px system-ui;
+      background: #131821;
+      color: #eef2f7;
+    }
+    button {
+      padding: 11px;
+      border: 0;
+      border-radius: 8px;
+      background: #f4d03f;
+      margin: 8px 0;
+      font-weight: 700;
+    }
+    p {
+      line-height: 1.5;
+    }
+    small {
+      color: #b6c0ce;
+    }
+  </style>
+  <h2>Capturar para o painel</h2>
+  <small>Versão 0.3.1</small>
+  <p>Use na página de produto ou vitrine do Mercado Livre que já está aberta.</p>
+  <button id="capture">Capturar esta página</button>
+  <p id="status" role="status"></p>
+  <button id="transfer" hidden>Conferir no painel local</button>
+  <p>
+    <small
+      >A captura pontual não publica. Para busca e links automáticos, conecte esta extensão nas
+      Configurações do painel.</small
+    >
+  </p>
+  <script type="module" src="popup.js"></script>
+</html>
