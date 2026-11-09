@@ -6,7 +6,15 @@ Executar na raiz do Offer App com Node >=24, Playwright e um navegador instalado
 & C:/Users/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe test-ui/run.mjs
 ```
 
-O runner procura primeiro uma instalação local de `playwright` e usa como alternativa o Playwright já fornecido pelo runtime Codex e Microsoft Edge em modo headless. Em outro ambiente, defina `OFFER_PLAYWRIGHT_PATH` para o caminho de `playwright/index.mjs` e `OFFER_BROWSER_CHANNEL` para o canal instalado (`chrome`, `msedge`, etc.). Não instala dependências nem navegadores.
+O runner procura primeiro uma instalação local de `playwright` e usa como alternativa o Playwright já fornecido pelo runtime Codex e Microsoft Edge em modo headless. Em outro ambiente, defina `OFFER_PLAYWRIGHT_PATH` para o caminho de `playwright/index.mjs` e `OFFER_BROWSER_CHANNEL` para o canal instalado (`chrome`, `msedge`, etc.). Todos os scripts respeitam essa variável; use `OFFER_BROWSER_CHANNEL=chromium` para o Chromium que acompanha o Playwright (Linux e CI). Não instala dependências nem navegadores.
+
+No Linux/CI:
+
+```bash
+OFFER_BROWSER_CHANNEL=chromium npm run test:ui
+```
+
+O workflow `.github/workflows/ci.yml` executa `npm run verify` e `npm run test:ui` com Node 24 e Chromium a cada push e pull request.
 
 Cada execução inicia o servidor HTTP real, a camada de aplicação real e SQLite em diretório temporário. O publisher retorna somente um grupo fictício e nunca abre conexão WhatsApp. Nenhum worker é iniciado. Todas as requisições do navegador fora do servidor local são bloqueadas. A pausa só é removida na base descartável para validar aprovação e fila; não há transporte capaz de enviar. A base é removida ao final.
 

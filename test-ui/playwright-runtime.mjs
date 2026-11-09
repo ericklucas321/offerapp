@@ -22,3 +22,15 @@ export async function loadPlaywright() {
     }
   }
 }
+
+// OFFER_BROWSER_CHANNEL escolhe o navegador (padrão: msedge). Use "chromium"
+// para o Chromium que acompanha o Playwright, sem canal instalado no sistema.
+export async function launchBrowser(options = {}) {
+  const { chromium } = await loadPlaywright();
+  const channel = process.env.OFFER_BROWSER_CHANNEL ?? 'msedge';
+  return chromium.launch({
+    headless: true,
+    ...options,
+    ...(channel && channel !== 'chromium' ? { channel } : {}),
+  });
+}

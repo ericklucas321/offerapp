@@ -43,7 +43,7 @@ npm run test:ui         # interface com banco temporário e transporte fictício
 npm run build:package   # distribuição sem dados e credenciais
 ```
 
-Os testes de interface usam uma instalação existente de Playwright e um navegador; veja [test-ui/README.md](test-ui/README.md). Não enviam mensagens reais. A validação das contas e das páginas reais das lojas depende do ambiente do usuário.
+Os testes de interface usam uma instalação existente de Playwright e um navegador; veja [test-ui/README.md](test-ui/README.md). No Linux, use `OFFER_BROWSER_CHANNEL=chromium`. O GitHub Actions executa `verify` e `test:ui` em cada push. Não enviam mensagens reais. A validação das contas e das páginas reais das lojas depende do ambiente do usuário.
 
 Para atualizar, encerre o aplicativo e preserve `data/` e `.env`. Não compartilhe o banco nem a sessão do WhatsApp.
 

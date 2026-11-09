@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { loadPlaywright } from './playwright-runtime.mjs';
+import { launchBrowser } from './playwright-runtime.mjs';
 import { startFixture } from './fixture.mjs';
-const { chromium } = await loadPlaywright();
 const fixture = await startFixture();
 fixture.platform.saveGroup({ id: '123456789@g.us' }, [
   { id: '123456789@g.us', name: 'Grupo de teste local' },
@@ -12,7 +11,7 @@ fixture.platform.saveTopic({
   stores: ['mercadolivre'],
   groupIds: ['123456789@g.us'],
 });
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await launchBrowser();
 const context = await browser.newContext();
 await context.route('**/*', (route) =>
   route.request().url().startsWith(fixture.base) ? route.continue() : route.abort(),

@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadPlaywright } from './playwright-runtime.mjs';
+import { launchBrowser } from './playwright-runtime.mjs';
 import { startFixture } from './fixture.mjs';
-const { chromium } = await loadPlaywright();
 const evidence = path.resolve('test-ui/evidence');
 fs.mkdirSync(evidence, { recursive: true });
 const fixture = await startFixture();
-const browser = await chromium.launch({
-  channel: process.env.OFFER_BROWSER_CHANNEL || 'msedge',
-  headless: true,
-});
+const browser = await launchBrowser();
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
   timezoneId: 'America/Sao_Paulo',

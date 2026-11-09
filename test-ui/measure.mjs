@@ -1,9 +1,8 @@
 import fs from 'node:fs';
-import { loadPlaywright } from './playwright-runtime.mjs';
-const { chromium } = await loadPlaywright();
+import { launchBrowser } from './playwright-runtime.mjs';
 import { startFixture } from './fixture.mjs';
 const f = await startFixture();
-const b = await chromium.launch({ channel: 'msedge' });
+const b = await launchBrowser();
 const p = await b.newPage({ viewport: { width: 375, height: 900 } });
 try {
   await p.goto(f.base);

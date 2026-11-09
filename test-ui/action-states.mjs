@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { loadPlaywright } from './playwright-runtime.mjs';
+import { launchBrowser } from './playwright-runtime.mjs';
 import { startFixture } from './fixture.mjs';
-const { chromium } = await loadPlaywright();
 const fixture = await startFixture();
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await launchBrowser();
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const page = await context.newPage();
 const results = [],

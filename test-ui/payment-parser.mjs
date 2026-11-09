@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
-import { loadPlaywright } from './playwright-runtime.mjs';
+import { launchBrowser } from './playwright-runtime.mjs';
 import { extractMarketDocument, snapshotFromDocument } from '../src/shared/market-parser.mjs';
 import { clickAffiliate, closeAffiliate, readAffiliate } from '../extension/store-adapters.js';
-const { chromium } = await loadPlaywright();
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+const browser = await launchBrowser();
 const context = await browser.newContext();
 await context.route('**/*', (route) => route.abort());
 const page = await context.newPage();
