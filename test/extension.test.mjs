@@ -112,6 +112,49 @@ test('busca roda em janela minimizada dedicada sem roubar o foco e registra as e
     ],
   );
 });
+test('reinício do service worker reutiliza a mesma janela minimizada', async () => {
+  const saved = {};
+  let created = 0;
+  for (let run = 0; run < 2; run++) {
+    const { worker, chromeApi } = workerFixture();
+    chromeApi.storage.session = {
+      get: async () => ({ ...saved }),
+      set: async (value) => Object.assign(saved, value),
+    };
+    chromeApi.windows = {
+      create: async () => ({ id: 40 + ++created }),
+      get: async (id) => ({ id }),
+    };
+    await worker.run();
+  }
+  assert.equal(created, 1);
+  assert.equal(saved.workerWindowId, 41);
+});
+test('gerador lento restaura a janela sem foco e minimiza de novo ao terminar', async () => {
+  const { worker, chromeApi } = workerFixture({
+    job: {
+      id: 1,
+      kind: 'refresh',
+      marketplace: 'amazon',
+      payload: { productUrl: 'https://www.amazon.com.br/dp/B012345678' },
+    },
+  });
+  const states = [];
+  chromeApi.windows = {
+    create: async () => ({ id: 40 }),
+    get: async (id) => ({ id }),
+    update: async (id, options) => states.push(options),
+  };
+  let reads = 0;
+  chromeApi.scripting.executeScript = async ({ func }) => {
+    if (func.name === 'readProduct')
+      return [{ result: { title: 'P', priceCents: 100, stockStatus: 'available' } }];
+    if (func.name === 'clickAffiliate') return [{ result: true }];
+    return [{ result: ++reads > 31 ? 'https://amzn.to/abc' : null }];
+  };
+  await worker.run();
+  assert.deepEqual(states, [{ state: 'normal', focused: false }, { state: 'minimized' }]);
+});
 test('sem API de janelas a busca abre aba inativa', async () => {
   const { worker, chromeApi } = workerFixture();
   let active;

@@ -193,6 +193,17 @@
         </div>
       </form>
     </dialog>
+    <dialog id="captureDialog" aria-labelledby="captureTitle">
+      <form method="dialog" class="dialog">
+        <h2 id="captureTitle">Conferir captura</h2>
+        <p class="muted">Produtos capturados pela extensão que serão adicionados às ofertas:</p>
+        <ul id="capturePreview"></ul>
+        <div class="actions">
+          <button id="confirmCapture" type="button">Adicionar às ofertas</button>
+          <button value="cancel" class="secondary">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="/app.js"></script>
   </body>

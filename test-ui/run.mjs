@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { launchBrowser } from './playwright-runtime.mjs';
 import { startFixture } from './fixture.mjs';
+import { CAPTURE_PROTOCOL, captureItem } from '../src/shared/capture-contract.mjs';
 
 const evidence = path.resolve('test-ui/evidence');
 fs.mkdirSync(evidence, { recursive: true });
@@ -142,6 +143,37 @@ try {
       await page.getByRole('switch').click();
       await page.locator('#operationLabel', { hasText: 'Desligado' }).waitFor();
       assert.equal(fixture.store.setting('publication_paused'), 'true');
+    },
+  );
+
+  await scenario(
+    'Captura enviada pela extensão abre a conferência e entra nas ofertas',
+    async () => {
+      const packet = {
+        version: CAPTURE_PROTOCOL.version,
+        items: [
+          captureItem(
+            {
+              productKey: 'MLB987654321',
+              title: 'Air fryer capturada',
+              productUrl: 'https://produto.mercadolivre.com.br/MLB-987654321-air-fryer',
+              imageUrl: '',
+              priceCents: 29900,
+              available: false,
+              observedAt: new Date().toISOString(),
+              priceCondition: 'Preço à vista anunciado',
+            },
+            'card',
+          ),
+        ],
+      };
+      await page.goto(
+        `${fixture.base}/#browser-capture=${encodeURIComponent(JSON.stringify(packet))}`,
+      );
+      await page.locator('#captureDialog[open]').waitFor();
+      assert.match(await page.locator('#capturePreview').innerText(), /Air fryer capturada/);
+      await page.getByRole('button', { name: 'Adicionar às ofertas' }).click();
+      await page.locator('#offerRows', { hasText: 'Air fryer capturada' }).waitFor();
     },
   );
 

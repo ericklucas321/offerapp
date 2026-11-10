@@ -155,10 +155,11 @@ export function createServer({
       }
       const state = async (section) => {
         const captures = store.captures();
+        const platformStatus = platform.status();
         return {
           ok: true,
           version: VERSION,
-          platform: platform.status(),
+          platform: platformStatus,
           whatsapp: {
             ...publisher.status(),
             ...(section === 'settings' ? { qrDataUrl: await publisher.qrDataUrl() } : {}),
@@ -168,7 +169,7 @@ export function createServer({
             name: store.setting('whatsapp_group_name'),
           },
           publicationPaused: store.setting('publication_paused', 'true') === 'true',
-          automatic: platform.status().automaticEnabled,
+          automatic: platformStatus.automaticEnabled,
           queue: store.queueStats(),
           daily: store.dailyStats(),
           rules: RULES,
@@ -275,10 +276,8 @@ export function createServer({
           });
         if (route === '/api/review/preview')
           return reply(res, 200, { ok: true, ...platform.batchPreview(data.selection) });
-        if (route === '/api/review/approve') {
-          if (data.resume === true) store.setSetting('publication_paused', 'false');
+        if (route === '/api/review/approve')
           return reply(res, 200, { ok: true, ...platform.approveBatch(data) });
-        }
         if (route === '/api/review/discard') {
           platform.discard(data);
           return reply(res, 200, { ok: true });

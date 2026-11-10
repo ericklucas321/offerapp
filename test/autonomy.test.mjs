@@ -201,7 +201,7 @@ test('modo por grupo: um controle define revisão ou automático e grupos podem 
   assert.equal(store.setting('automatic_enabled'), 'true');
   assert.deepEqual(JSON.parse(store.setting('automatic_groups')), ['123@g.us']);
   assert.equal(store.setting('publication_paused'), 'false');
-  assert.equal(platform.status().operationEnabled, true);
+  assert.equal(platform.status().searchEnabled, true);
   platform.saveGroup({ id: '123@g.us', mode: 'off' }, known);
   assert.equal(platform.groups().find((g) => g.id === '123@g.us').enabled, 0);
   assert.equal(store.setting('automatic_enabled'), 'false');
@@ -239,4 +239,26 @@ test('migração 4 converte grupos ligados, grupos do automático e desligados',
     ],
   );
   assert.equal(migrated.db.prepare('SELECT group_ids FROM topics').get().group_ids, '[]');
+});
+
+test('Testar agora e testes de recuperação não criam ofertas na lista', (t) => {
+  const { platform, store, observation } = fixture(t);
+  platform.claimJob();
+  platform.startDiagnostic();
+  const search = platform.claimJob();
+  platform.completeJob(search.id, { urls: [url(1)] });
+  const product = platform.claimJob();
+  platform.completeJob(product.id, { observation: observation(1) });
+  assert.equal(platform.diagnostic().state, 'passed');
+  assert.equal(store.listOffers().length, 0);
+});
+
+test('resultado que chega depois do tempo esgotado é ignorado sem erro', (t) => {
+  const { platform, ready, advance, observation } = fixture(t);
+  ready();
+  platform.addJob('mercadolivre', 'product', { productUrl: url(1) });
+  const job = platform.claimJob();
+  advance(181000);
+  platform.claimJob();
+  assert.doesNotThrow(() => platform.completeJob(job.id, { observation: observation(1) }));
 });

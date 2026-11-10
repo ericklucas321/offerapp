@@ -376,7 +376,9 @@ export class Platform {
       deliveries: rows.reduce((n, r) => n + r.groups.length, 0),
     };
   }
-  approveBatch({ id, token, confirmed }) {
+  // `resume`: the user is explicitly sending now, so a paused queue is resumed, but only
+  // once this approval has passed every check.
+  approveBatch({ id, token, confirmed, resume = false }) {
     requireValue(confirmed === true, 'publication_confirmation_required');
     requireValue(
       typeof id === 'string' &&
@@ -389,7 +391,10 @@ export class Platform {
     requireValue(batch && token === batch.token, 'publication_review_changed');
     if (batch.completed_at) return JSON.parse(batch.result);
     requireValue(this.now() - Date.parse(batch.created_at) <= 900000, 'publication_review_changed');
-    requireValue(this.store.setting('publication_paused', 'true') !== 'true', 'publication_paused');
+    requireValue(
+      resume === true || this.store.setting('publication_paused', 'true') !== 'true',
+      'publication_paused',
+    );
     const rows = JSON.parse(batch.snapshot);
     return this.store.transaction(() => {
       const currentGroups = new Map(this.groups().map((g) => [g.id, g]));
@@ -447,6 +452,10 @@ export class Platform {
         .prepare('UPDATE platform_review_batches SET completed_at=?,result=? WHERE id=?')
         .run(new Date(this.now()).toISOString(), JSON.stringify(result), id);
       this.store.event('batch_approved', null, result);
+      if (resume === true && this.store.setting('publication_paused', 'true') === 'true') {
+        this.store.setSetting('publication_paused', 'false');
+        this.store.event('publication_pause_changed', null, { paused: false, batchId: id });
+      }
       return result;
     });
   }
@@ -531,7 +540,6 @@ export class Platform {
           )
           .get()?.error || '',
       searchEnabled: this.store.setting('search_enabled', 'false') === 'true',
-      operationEnabled: this.store.setting('search_enabled', 'false') === 'true',
       publicationPaused: this.store.setting('publication_paused', 'true') === 'true',
       bridgeConnected: this.bridgeConnected(),
       nextSearchAt: this.store.setting('next_search_at'),
@@ -713,9 +721,14 @@ export class Platform {
       'invalid_price',
       'product_marketplace_mismatch',
     ].includes(code);
-    const failuresKey = `refresh_failures_${job.delivery_id}`;
-    const failures = Number(this.store.setting(failuresKey, '0')) + 1;
-    this.store.setSetting(failuresKey, String(failures));
+    // Consecutive failed refreshes since the last successful one; account problems don't count.
+    const failures = this.store
+      .prepare(
+        `SELECT count(*) AS n FROM browser_jobs WHERE kind='refresh' AND delivery_id=? AND state='failed'
+           AND id > COALESCE((SELECT max(id) FROM browser_jobs WHERE kind='refresh' AND delivery_id=? AND state='done'),0)
+           AND COALESCE(json_extract(result,'$.code'),'') NOT IN (${[...ACCOUNT_CODES].map(() => '?').join(',')})`,
+      )
+      .get(job.delivery_id, job.delivery_id, ...ACCOUNT_CODES).n;
     if (productOnly || failures >= REFRESH_FAILURE_LIMIT) {
       this.store.blockDelivery(job.delivery_id, reason);
       if (productOnly)
@@ -749,6 +762,8 @@ export class Platform {
         return;
       }
     }
+    // The lease expired and the job was already failed: drop the late result quietly.
+    if (job.state === 'failed' && JSON.parse(job.result || '{}').code === 'job_timeout') return;
     if (['done', 'failed'].includes(job.state)) {
       requireValue(JSON.parse(job.result || '{}').receiptHash === receiptHash);
       return;
@@ -1007,7 +1022,12 @@ export class Platform {
     }
     if (job.kind === 'refresh') {
       requireValue(offer, 'offer_not_found');
-    } else if (eligible && o.stockStatus === 'available') {
+    } else if (
+      eligible &&
+      o.stockStatus === 'available' &&
+      !JSON.parse(job.payload).diagnostic &&
+      !JSON.parse(job.payload).probe
+    ) {
       if (
         !offer ||
         (offer.published_at &&

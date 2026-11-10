@@ -1,4 +1,5 @@
 // Offer panel: three screens (Ofertas, Canais, Configurar) over the local API.
+import { CAPTURE_PROTOCOL } from './capture-protocol.js';
 const $ = (id) => document.getElementById(id);
 const esc = (value) =>
   String(value ?? '').replace(
@@ -68,6 +69,7 @@ let deliveryCursor = null;
 let waGroups = null;
 let extensionId = null;
 let pendingSend = null;
+let capturePacket = null;
 const selected = new Set();
 
 async function api(path, data) {
@@ -167,7 +169,7 @@ function setupSteps() {
 function operationText() {
   const p = view.platform || {};
   const ml = (p.connections || []).find((c) => c.marketplace === 'mercadolivre') || {};
-  if (!p.operationEnabled) return 'Desligado. Ligue para pesquisar e enviar ofertas sozinho.';
+  if (!p.searchEnabled) return 'Desligado. Ligue para pesquisar e enviar ofertas sozinho.';
   if (!p.bridgeConnected)
     return 'Atenção: a extensão não está respondendo. Abra o navegador com a extensão.';
   if (ml.state === 'attention')
@@ -186,7 +188,7 @@ function renderOperation() {
   const p = view.platform || {};
   const steps = setupSteps();
   const missing = steps.filter((s) => !s.done);
-  const on = !!p.operationEnabled;
+  const on = !!p.searchEnabled;
   $('operationSwitch').setAttribute('aria-checked', String(on));
   $('operationLabel').textContent = on ? 'Ligado' : 'Desligado';
   $('operationStatus').textContent = operationText();
@@ -248,7 +250,7 @@ function renderOffers() {
         })
         .join('')
     : `<li class="empty">${
-        view.platform?.operationEnabled
+        view.platform?.searchEnabled
           ? 'Nenhuma oferta ainda. O Offer está pesquisando; as encontradas aparecem aqui.'
           : 'Nenhuma oferta ainda. Ligue o Offer para começar a pesquisar.'
       }</li>`;
@@ -330,7 +332,10 @@ function renderChannels() {
   $('waReconnect').hidden = wa.state === 'disconnected' && !wa.lastError;
   $('waLogout').hidden = wa.state === 'disconnected' && !wa.lastError;
 
-  const editing = $('groupRows').contains(document.activeElement);
+  // Keep a group form with unsaved edits (or focus) instead of rebuilding it on each poll.
+  const editing =
+    $('groupRows').contains(document.activeElement) ||
+    !!$('groupRows').querySelector('[data-dirty]');
   const groups = view.platform?.groups || [];
   if (!editing)
     $('groupRows').innerHTML = groups.length
@@ -455,7 +460,7 @@ document.querySelectorAll('[data-list]').forEach((tab) => {
 });
 $('operationSwitch').onclick = (e) =>
   act(e.currentTarget, async () => {
-    const enabled = !view.platform?.operationEnabled;
+    const enabled = !view.platform?.searchEnabled;
     await api('/api/platform/operation', { enabled });
     await refresh();
     toast(enabled ? 'Offer ligado: pesquisando e enviando sozinho.' : 'Offer desligado.');
@@ -588,6 +593,10 @@ document.addEventListener('change', (event) => {
   else selected.delete(Number(id));
   renderOffers();
 });
+document.addEventListener('input', (event) => {
+  const form = event.target.closest?.('[data-group]');
+  if (form) form.dataset.dirty = 'true';
+});
 document.addEventListener('submit', (event) => {
   const form = event.target.closest('[data-group]');
   if (!form) return;
@@ -600,6 +609,7 @@ document.addEventListener('submit', (event) => {
       endMinute: minutesOf(form.elements.end.value),
       intervalMinutes: Number(form.elements.interval.value),
     });
+    delete form.dataset.dirty;
     document.activeElement?.blur();
     await refresh();
     toast('Grupo salvo.');
@@ -693,6 +703,43 @@ function resetTopic() {
   $('topicError').hidden = true;
 }
 $('resetTopic').onclick = resetTopic;
+
+// The extension popup opens the panel with #browser-capture=<packet>.
+function receiveCapture() {
+  if (!location.hash.startsWith('#browser-capture=')) return;
+  const raw = location.hash.slice('#browser-capture='.length);
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    if (raw.length > CAPTURE_PROTOCOL.maxFragmentChars) throw new Error('too_large');
+    const data = JSON.parse(decodeURIComponent(raw));
+    if (
+      data.version !== CAPTURE_PROTOCOL.version ||
+      !Array.isArray(data.items) ||
+      !data.items.length ||
+      data.items.length > CAPTURE_PROTOCOL.maxItems
+    )
+      throw new Error('invalid');
+    capturePacket = data;
+    $('capturePreview').innerHTML = data.items
+      .map((i) => `<li>${esc(String(i?.title || 'Produto').slice(0, 500))}</li>`)
+      .join('');
+    $('captureDialog').showModal();
+  } catch {
+    toast('Captura inválida. Use a extensão na página da loja.', true);
+  }
+}
+$('confirmCapture').onclick = (e) =>
+  act(e.currentTarget, async () => {
+    await api('/api/browser-import/capture', { packet: capturePacket, confirmed: true });
+    capturePacket = null;
+    $('captureDialog').close();
+    section = 'offers';
+    list = 'found';
+    await refresh();
+    toast('Produtos adicionados às ofertas.');
+  });
+window.addEventListener('hashchange', receiveCapture);
+receiveCapture();
 
 refresh().catch((error) => toast(error.message, true));
 setInterval(() => {

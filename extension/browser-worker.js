@@ -21,6 +21,9 @@ export function createBrowserWorker({
   clock = () => Date.now(),
 } = {}) {
   let busy = false;
+  // MV3 service workers restart often; the window id is kept in storage so a restart
+  // reuses the same minimized window instead of opening another one.
+  const windowStore = () => chromeApi.storage?.session || chromeApi.storage?.local;
   let windowId = null;
   const execute = async (tabId, func, args = []) => {
     const results = await chromeApi.scripting.executeScript({ target: { tabId }, func, args });
@@ -31,6 +34,13 @@ export function createBrowserWorker({
   };
   async function workerWindow() {
     if (!chromeApi.windows?.create) return null;
+    if (windowId === null)
+      try {
+        const saved = (await windowStore()?.get?.('workerWindowId'))?.workerWindowId;
+        if (Number.isInteger(saved)) windowId = saved;
+      } catch {
+        /* Storage unavailable: a new window is created below. */
+      }
     if (windowId !== null)
       try {
         await chromeApi.windows.get(windowId);
@@ -44,6 +54,11 @@ export function createBrowserWorker({
       state: 'minimized',
     });
     windowId = created.id;
+    try {
+      await windowStore()?.set?.({ workerWindowId: windowId });
+    } catch {
+      /* Kept in memory only. */
+    }
     return windowId;
   }
   async function openTab(url) {
@@ -72,6 +87,21 @@ export function createBrowserWorker({
       'A página da loja demorou para abrir. Confira a conexão com a internet.',
       'page_timeout',
     );
+  }
+  // A minimized window can throttle the store page. When the affiliate generator is slow,
+  // the window is restored (unfocused, behind the user's window) and minimized again after.
+  let restored = false;
+  async function setWindowState(state) {
+    if (windowId === null || !chromeApi.windows?.update) return;
+    try {
+      await chromeApi.windows.update(windowId, {
+        state,
+        ...(state === 'normal' ? { focused: false } : {}),
+      });
+      restored = state === 'normal';
+    } catch {
+      /* The user may have closed the window. */
+    }
   }
   async function perform(job, steps) {
     const step = async (name, action) => {
@@ -149,6 +179,7 @@ export function createBrowserWorker({
       });
       const affiliateUrl = await step('read_affiliate', async () => {
         for (let attempt = 0; attempt < 60; attempt++) {
+          if (attempt === 30) await setWindowState('normal');
           if (attempt === 30 && job.marketplace === 'mercadolivre') {
             await execute(tabId, closeAffiliate, [job.marketplace]);
             await delay(500);
@@ -168,6 +199,7 @@ export function createBrowserWorker({
       });
       return { observation: { ...observation, affiliateUrl, affiliateObserved: true } };
     } finally {
+      if (restored) await setWindowState('minimized');
       try {
         await chromeApi.tabs.remove(tabId);
       } catch {
