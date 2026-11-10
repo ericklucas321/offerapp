@@ -1,12 +1,11 @@
 # Testes de interface isolados
 
-Executar na raiz do Offer App com Node >=24, Playwright e um navegador instalado:
+`npm run test:ui` executa dois scripts com Node 24, Playwright e um navegador:
 
-```powershell
-& C:/Users/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe test-ui/run.mjs
-```
+- `run.mjs`: o painel inteiro (Ofertas, Canais, Configurar) contra o servidor real e um banco SQLite temporário.
+- `payment-parser.mjs`: a leitura das páginas do Mercado Livre (preço, Pix, variantes, estoque, gerador de links) em páginas de exemplo.
 
-O runner procura primeiro uma instalação local de `playwright` e usa como alternativa o Playwright já fornecido pelo runtime Codex e Microsoft Edge em modo headless. Em outro ambiente, defina `OFFER_PLAYWRIGHT_PATH` para o caminho de `playwright/index.mjs` e `OFFER_BROWSER_CHANNEL` para o canal instalado (`chrome`, `msedge`, etc.). Todos os scripts respeitam essa variável; use `OFFER_BROWSER_CHANNEL=chromium` para o Chromium que acompanha o Playwright (Linux e CI). Não instala dependências nem navegadores.
+O runner procura primeiro uma instalação local de `playwright`. Em outro ambiente, defina `OFFER_PLAYWRIGHT_PATH` para o caminho de `playwright/index.mjs` e `OFFER_BROWSER_CHANNEL` para o canal instalado (`chrome`, `msedge`, etc.; o padrão é `msedge`). Use `OFFER_BROWSER_CHANNEL=chromium` para o Chromium que acompanha o Playwright (Linux e CI). Não instala dependências nem navegadores.
 
 No Linux/CI:
 
@@ -16,12 +15,15 @@ OFFER_BROWSER_CHANNEL=chromium npm run test:ui
 
 O workflow `.github/workflows/ci.yml` executa `npm run verify` e `npm run test:ui` com Node 24 e Chromium a cada push e pull request.
 
-Cada execução inicia o servidor HTTP real, a camada de aplicação real e SQLite em diretório temporário. O publisher retorna somente um grupo fictício e nunca abre conexão WhatsApp. Nenhum worker é iniciado. Todas as requisições do navegador fora do servidor local são bloqueadas. A pausa só é removida na base descartável para validar aprovação e fila; não há transporte capaz de enviar. A base é removida ao final.
+## O que `run.mjs` cobre
 
-Cobertura: navegação, configuração de grupo, falha recuperável de integração, validação de formulário com preservação dos campos, cadastro, edição, persistência após recarregar, duplicação, bloqueio por pausa, aprovação, agendamento, cancelamento, histórico e responsividade nas três áreas em 375/768/1440px. Também verifica tamanho legível dos campos mobile, alvos de navegação e ausência de exceções JavaScript/requisições externas.
+- As três telas e o guia de configuração; o interruptor "Offer trabalhando sozinho" fica bloqueado até a configuração mínima.
+- Canais: WhatsApp conectado com Reconectar e Desconectar, grupo adicionado e colocado em Automático.
+- Configurar: tema criado, validado e editado; "Testar agora" exige a extensão e mostra as etapas.
+- Ofertas: ligar e desligar o Offer, enviar uma oferta pronta e vê-la na fila em Envios.
+- 375, 768 e 1440 px sem rolagem horizontal e com botões de navegação de pelo menos 44 px.
+- Nenhum erro de JavaScript e nenhuma requisição fora do servidor local.
 
-`evidence/results.json` e screenshots são substituídos em cada execução. `ui-before.json` e `ui-before.log` preservam a regressão inicialmente reproduzida. `measure.mjs` coleta medidas adicionais; `no-group.mjs` reproduz o estado da oferta sem grupo configurado.
+O publisher do WhatsApp é fictício e nunca envia mensagens. A fila não é iniciada. `evidence/results.json` e as capturas de tela são substituídos a cada execução.
 
-Esses testes não comprovam conexão/persistência de credenciais reais, WhatsApp Web, leitura real de grupos, envio real, autorização de afiliados nem garimpo nas lojas. Essas verificações dependem de integração e autorização próprias.
-
-O cenário de envio parcial escreve artificialmente um estado `sent` na base temporária, preserva essa entrega e testa a revalidação do destino restante. Isso não envolve envio real nem chamada ao publisher.
+Esses testes não comprovam conexão real com o WhatsApp, a conta de afiliado nem as páginas reais das lojas. Para isso, use "Testar agora" em Configurar com sua conta.

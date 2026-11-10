@@ -84,7 +84,7 @@ export class PublicationPolicy {
     )
       return {
         allowed: false,
-        reason: 'Conexão da loja suspensa; valide novamente em Configurações',
+        reason: 'Conexão da loja suspensa; confira em Configurar',
       };
     if (offer && this.store.otherPendingProduct(offer, destination))
       return {

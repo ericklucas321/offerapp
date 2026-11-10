@@ -337,7 +337,7 @@ test('reinício preserva captura, vínculo, aprovação, grupo e agendamento', (
   assert.equal(saved.next_attempt_at, job.next_attempt_at);
   assert.equal(saved.state, 'queued');
   assert.equal(restarted.setting('whatsapp_group_id'), '123@g.us');
-  assert.equal(restarted.db.prepare('SELECT count(*) AS n FROM schema_migrations').get().n, 3);
+  assert.equal(restarted.db.prepare('SELECT count(*) AS n FROM schema_migrations').get().n, 4);
   assert.equal(restarted.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
 });
 

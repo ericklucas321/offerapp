@@ -8,20 +8,17 @@ Execute `INSTALAR.bat` na primeira instalação e `INICIAR.bat` para abrir o apl
 
 ## Configurar e usar
 
-1. Em **Configurações**, conecte o WhatsApp e a extensão do navegador. A extensão atual é a **0.4.0**: extraia o download, carregue a pasta em `chrome://extensions` ou `edge://extensions` e clique **Conectar extensão** no painel. Depois de atualizar os arquivos, recarregue a extensão.
-2. Valide cada loja com um produto real, usando sua conta afiliada conectada no navegador.
-3. Escolha os **grupos**, seus horários e o intervalo entre envios. Os horários usam Brasília. Início igual ao fim permite 24 horas.
-4. Defina **temas e preços**: palavras-chave, lojas, faixa de preço e grupos de destino.
-5. Ative a **busca contínua**. Ela pesquisa a cada 30 minutos, sem executar dois ciclos ao mesmo tempo.
+O painel tem três telas: **Ofertas**, **Canais** e **Configurar**. Enquanto falta algo, a tela Ofertas mostra o que fazer.
 
-Há dois modos de envio:
+1. **Configurar → Extensão:** baixe a extensão (versão **0.4.0**), extraia, carregue a pasta em `chrome://extensions` ou `edge://extensions` (modo do desenvolvedor) e clique **Conectar extensão**. Use o navegador onde você está logado na conta de afiliado do Mercado Livre.
+2. **Configurar → Mercado Livre:** clique **Testar agora**. O Offer faz uma busca e gera um link de afiliado, mostrando cada etapa. Se algo falhar, a etapa e o motivo aparecem ali.
+3. **Canais:** conecte o WhatsApp pelo QR, clique **Buscar grupos do WhatsApp** e adicione os grupos. Para cada grupo escolha **Não recebe**, **Com revisão** ou **Automático**, além do horário (Brasília) e do intervalo entre envios. Início igual ao fim permite 24 horas.
+4. **Configurar → Temas:** palavras-chave e faixa de preço. Cada tema vale para todos os grupos que recebem ofertas.
+5. **Ofertas:** ligue **Offer trabalhando sozinho**. Ele pesquisa a cada 30 minutos, gera os links e envia sozinho aos grupos em Automático. Nos grupos Com revisão, selecione as ofertas e clique **Enviar**.
 
-- **Manual:** confira as ofertas, revise o lote e aprove os destinos. Retome os envios quando estiver pronto.
-- **Automático:** habilite explicitamente os grupos autorizados em **Temas e preços**. O aplicativo agenda uma oferta pendente por grupo, respeitando temas, preços, horários e intervalo. O botão de pausa interrompe os envios nos dois modos.
+Desligar o interruptor para a busca e os envios automáticos. Um envio que você confirma manualmente sempre sai. A extensão trabalha numa janela minimizada e não rouba o foco.
 
-Sem o automático habilitado, a inicialização pausa os envios. Com ele habilitado, a configuração e a pausa existentes são preservadas. Computador, aplicativo e navegador precisam permanecer ativos.
-
-Também é possível cadastrar uma oferta manualmente ou capturar um produto do Mercado Livre pela extensão. Ofertas manuais exigem confirmação recente de preço e estoque.
+**O que acontece quando algo falha:** um produto com problema é ignorado e a busca continua. Só um problema na conta (deslogado, verificação da loja ou o gerador de links falhando em 3 produtos seguidos) suspende o Mercado Livre. Nesse caso o aviso aparece em Ofertas e o Offer testa de novo sozinho a cada 30 minutos. Computador, aplicativo e navegador precisam continuar ligados.
 
 ## Regras do envio
 

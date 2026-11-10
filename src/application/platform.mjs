@@ -65,13 +65,22 @@ export class Platform {
   saveGroup(input, knownGroups) {
     const known = knownGroups.find((g) => g.id === input.id);
     requireValue(known && /^\d+(?:-\d+)?@g\.us$/.test(input.id), 'invalid_whatsapp_group');
-    const { startMinute = 480, endMinute = 1320, intervalMinutes = 60, enabled = true } = input;
+    const previousGroup = this.groups().find((g) => g.id === input.id);
+    const { startMinute = 480, endMinute = 1320, intervalMinutes = 60 } = input;
+    const mode =
+      input.mode ??
+      (input.enabled === false
+        ? 'off'
+        : previousGroup && previousGroup.mode !== 'off'
+          ? previousGroup.mode
+          : 'review');
+    requireValue(['off', 'review', 'automatic'].includes(mode));
+    const enabled = mode !== 'off';
     requireValue([startMinute, endMinute].every((v) => Number.isInteger(v) && v >= 0 && v < 1440));
     requireValue(
       Number.isInteger(intervalMinutes) && intervalMinutes > 0 && intervalMinutes <= 1440,
     );
-    requireValue(typeof enabled === 'boolean');
-    const previous = this.groups().find((g) => g.id === input.id);
+    const previous = previousGroup;
     const changed =
       previous &&
       (previous.enabled !== +enabled ||
@@ -80,10 +89,10 @@ export class Platform {
         previous.interval_minutes !== intervalMinutes);
     this.store
       .prepare(
-        `INSERT INTO destination_groups(id,name,enabled,start_minute,end_minute,interval_minutes)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,
+        `INSERT INTO destination_groups(id,name,enabled,start_minute,end_minute,interval_minutes,mode)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,
       start_minute=excluded.start_minute,end_minute=excluded.end_minute,interval_minutes=excluded.interval_minutes,
-      revision=destination_groups.revision+?`,
+      mode=excluded.mode,revision=destination_groups.revision+?`,
       )
       .run(
         input.id,
@@ -92,8 +101,10 @@ export class Platform {
         startMinute,
         endMinute,
         intervalMinutes,
+        mode,
         changed ? 1 : 0,
       );
+    this.syncAutomaticGroups();
     if (changed)
       for (const delivery of this.store
         .prepare("SELECT id FROM deliveries WHERE destination=? AND state='queued'")
@@ -104,12 +115,80 @@ export class Platform {
         );
     return this.groups();
   }
+  // The automatic list is derived from each group's mode.
+  syncAutomaticGroups() {
+    const ids = this.groups()
+      .filter((g) => g.mode === 'automatic')
+      .map((g) => g.id);
+    const config = automaticConfiguration(this.store);
+    const on = config.automaticEnabled || this.store.setting('search_enabled', 'false') === 'true';
+    if (on && ids.length) this.automation.configure({ enabled: true, groupIds: ids });
+    else if (config.automaticEnabled) this.automation.configure({ enabled: false });
+    this.store.setSetting('automatic_groups', JSON.stringify(ids));
+  }
+  deleteGroup(id) {
+    requireValue(
+      this.groups().some((g) => g.id === id),
+      'invalid_whatsapp_group',
+    );
+    this.store.transaction(() => {
+      for (const delivery of this.store
+        .prepare("SELECT id FROM deliveries WHERE destination=? AND state='queued'")
+        .all(id))
+        this.store.blockDelivery(delivery.id, 'Grupo removido');
+      this.store.prepare('DELETE FROM destination_groups WHERE id=?').run(id);
+      for (const topic of this.topics())
+        if (topic.groupIds.includes(id))
+          this.store
+            .prepare('UPDATE topics SET group_ids=? WHERE id=?')
+            .run(JSON.stringify(topic.groupIds.filter((g) => g !== id)), topic.id);
+    });
+    this.syncAutomaticGroups();
+    return this.groups();
+  }
+  deleteTopic(id) {
+    requireValue(
+      Number.isSafeInteger(id) && this.store.prepare('SELECT 1 FROM topics WHERE id=?').get(id),
+    );
+    this.store.transaction(() => {
+      this.store
+        .prepare(
+          "UPDATE browser_jobs SET state='cancelled',error='Tema removido' WHERE topic_id=? AND state IN ('pending','running')",
+        )
+        .run(id);
+      this.store.prepare('DELETE FROM offer_topics WHERE topic_id=?').run(id);
+      this.store.prepare('DELETE FROM topics WHERE id=?').run(id);
+    });
+    return this.topics();
+  }
+  // "Offer trabalhando sozinho": one switch for search, automatic sending and the queue.
+  setOperation(enabled) {
+    requireValue(typeof enabled === 'boolean');
+    const ids = this.groups()
+      .filter((g) => g.mode === 'automatic')
+      .map((g) => g.id);
+    this.store.setSetting('search_enabled', String(enabled));
+    this.automation.configure(
+      enabled && ids.length ? { enabled: true, groupIds: ids } : { enabled: false },
+    );
+    this.store.setSetting('automatic_groups', JSON.stringify(ids));
+    this.store.setSetting('publication_paused', String(!enabled));
+    this.store.event('publication_pause_changed', null, { paused: !enabled });
+    if (!enabled)
+      this.store
+        .prepare(
+          "UPDATE browser_jobs SET state='cancelled' WHERE state='pending' AND kind IN ('search','product') AND json_extract(payload,'$.diagnostic') IS NULL",
+        )
+        .run();
+    if (enabled) this.tick(true);
+    return this.status();
+  }
   saveTopic(input) {
     const {
       name,
       keywords,
       stores,
-      groupIds,
+      groupIds = [],
       minCents = 0,
       maxCents = null,
       enabled = true,
@@ -125,9 +204,7 @@ export class Platform {
       Array.isArray(stores) && stores.length > 0 && stores.every((s) => Object.hasOwn(STORES, s)),
     );
     const groups = new Set(this.groups().map((g) => g.id));
-    requireValue(
-      Array.isArray(groupIds) && groupIds.length > 0 && groupIds.every((id) => groups.has(id)),
-    );
+    requireValue(Array.isArray(groupIds) && groupIds.every((id) => groups.has(id)));
     requireValue(
       Number.isSafeInteger(minCents) &&
         minCents >= 0 &&
@@ -171,9 +248,10 @@ export class Platform {
       .prepare(
         `SELECT DISTINCT g.id FROM offer_topics ot
          JOIN topics t ON t.id=ot.topic_id
-         JOIN json_each(t.group_ids) assigned
-         JOIN destination_groups g ON g.id=assigned.value
-         WHERE ot.offer_id=? AND t.enabled=1 AND g.enabled=1 ORDER BY g.name,g.rowid`,
+         JOIN destination_groups g
+         WHERE ot.offer_id=? AND t.enabled=1 AND g.enabled=1
+           AND (json_array_length(t.group_ids)=0 OR g.id IN (SELECT value FROM json_each(t.group_ids)))
+         ORDER BY g.name,g.rowid`,
       )
       .all(offer.id)
       .map((g) => g.id);
@@ -220,7 +298,7 @@ export class Platform {
             !eligibleGroups.length && reconfirmManual
               ? 'Confira novamente preço e estoque para revisar os destinos restantes.'
               : !eligibleGroups.length && !groups.length && !i.reason
-                ? 'Habilite um grupo de destino em Configurações.'
+                ? 'Escolha um grupo para receber ofertas em Canais.'
                 : i.reason,
           eligibleGroups,
           suggestedGroups: offer
@@ -453,6 +531,8 @@ export class Platform {
           )
           .get()?.error || '',
       searchEnabled: this.store.setting('search_enabled', 'false') === 'true',
+      operationEnabled: this.store.setting('search_enabled', 'false') === 'true',
+      publicationPaused: this.store.setting('publication_paused', 'true') === 'true',
       bridgeConnected: this.bridgeConnected(),
       nextSearchAt: this.store.setting('next_search_at'),
       lastSearchAt: this.store.setting('last_search_at'),
@@ -934,7 +1014,7 @@ export class Platform {
           this.groups().some(
             (g) =>
               g.enabled &&
-              (!topic || topic.groupIds.includes(g.id)) &&
+              (!topic || !topic.groupIds.length || topic.groupIds.includes(g.id)) &&
               repeatAllowed(
                 this.store.lastPublication(
                   normalized.productKey,

@@ -60,7 +60,8 @@ test('API operacional oferece três áreas, rejeita origens externas e remove ro
   const html = await (await fetch(base)).text();
   assert.match(html, /Ofertas/);
   assert.match(html, /Envios/);
-  assert.match(html, /Configurações/);
+  assert.match(html, /Canais/);
+  assert.match(html, /Configurar/);
   for (const text of ['Conectar Mercado Livre', 'V4 ·', 'Piloto', 'Gerar meu link'])
     assert.equal(html.includes(text), false);
   for (const route of [

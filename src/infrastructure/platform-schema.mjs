@@ -1,4 +1,8 @@
 export function migratePlatform(db) {
+  migrateV3(db);
+  migrateGroupModes(db);
+}
+function migrateV3(db) {
   if (db.prepare('SELECT 1 FROM schema_migrations WHERE version=3').get()) return;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -51,6 +55,38 @@ export function migratePlatform(db) {
       .get()?.value;
     if (id) db.prepare('INSERT INTO destination_groups(id,name) VALUES(?,?)').run(id, name || id);
     db.prepare('INSERT INTO schema_migrations VALUES(3,?)').run(new Date().toISOString());
+    db.exec('COMMIT');
+  } catch (error) {
+    if (db.isTransaction) db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+// Version 4: one control per group (off / review / automatic) replaces the group toggle,
+// the automatic group list and the groups chosen inside each topic.
+function migrateGroupModes(db) {
+  if (db.prepare('SELECT 1 FROM schema_migrations WHERE version=4').get()) return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(
+      "ALTER TABLE destination_groups ADD COLUMN mode TEXT NOT NULL DEFAULT 'review' CHECK(mode IN ('off','review','automatic'))",
+    );
+    let automatic = [];
+    try {
+      automatic = JSON.parse(
+        db.prepare("SELECT value FROM settings WHERE key='automatic_groups'").get()?.value || '[]',
+      );
+    } catch {
+      automatic = [];
+    }
+    const update = db.prepare('UPDATE destination_groups SET mode=? WHERE id=?');
+    for (const group of db.prepare('SELECT id,enabled FROM destination_groups').all())
+      update.run(
+        !group.enabled ? 'off' : automatic.includes(group.id) ? 'automatic' : 'review',
+        group.id,
+      );
+    db.exec("UPDATE topics SET group_ids='[]'");
+    db.prepare('INSERT INTO schema_migrations VALUES(4,?)').run(new Date().toISOString());
     db.exec('COMMIT');
   } catch (error) {
     if (db.isTransaction) db.exec('ROLLBACK');

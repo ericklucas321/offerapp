@@ -148,7 +148,7 @@ test('sem grupos habilitados a pendência explica a ação necessária', (t) => 
   const item = platform.reviewItems().find((i) => i.id === offer.id);
   assert.equal(item.ready, false);
   assert.equal(item.state, 'pending');
-  assert.match(item.reason, /grupo.*Configurações/i);
+  assert.match(item.reason, /grupo.*Canais/i);
 });
 
 test('oferta manual que expira em fila é cancelada e pode ser revalidada para nova aprovação', (t) => {

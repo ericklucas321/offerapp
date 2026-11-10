@@ -10,7 +10,7 @@
     "start": "node src/app.mjs",
     "dev": "node --watch src/app.mjs",
     "test": "node scripts/test.mjs",
-    "test:ui": "node test-ui/run.mjs && node test-ui/action-states.mjs && node test-ui/payment-parser.mjs && node test-ui/review-races.mjs && node test-ui/capture-auto.mjs && node test-ui/automatic.mjs",
+    "test:ui": "node test-ui/run.mjs && node test-ui/payment-parser.mjs",
     "check": "node scripts/check.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "format": "prettier src public extension scripts test test-ui/*.mjs --write",

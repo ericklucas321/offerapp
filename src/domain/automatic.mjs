@@ -37,7 +37,7 @@ export function automaticTopic(store, offer, destination) {
     topics.find(
       (t) =>
         JSON.parse(t.stores).includes(offer.marketplace) &&
-        JSON.parse(t.group_ids).includes(destination) &&
+        (JSON.parse(t.group_ids).length === 0 || JSON.parse(t.group_ids).includes(destination)) &&
         offer.price_cents >= t.min_cents &&
         (t.max_cents === null || offer.price_cents <= t.max_cents) &&
         titleMatchesTopic(offer.title, JSON.parse(t.keywords)),

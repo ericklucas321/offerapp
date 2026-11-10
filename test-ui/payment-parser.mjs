@@ -62,7 +62,17 @@ try {
   await page.setContent(
     '<div role="dialog"><button aria-label="close">Outro diálogo</button></div>',
   );
-  await assert.rejects(page.evaluate(closeAffiliate, 'mercadolivre'), /reabrir o gerador/);
+  const reopen = await page.evaluate(closeAffiliate, 'mercadolivre');
+  assert.match(reopen.error, /reabrir o gerador/);
+  assert.equal(reopen.code, 'affiliate_link_timeout');
+  await page.setContent(
+    '<main><a href="https://www.mercadolivre.com/jms/mlb/lgz/login">Entre</a></main>',
+  );
+  assert.equal(
+    (await page.evaluate(clickAffiliate, 'mercadolivre')).code,
+    'store_login_required',
+    'sem a barra de afiliados e com o link Entre, o motivo é o login',
+  );
   assert.equal(
     await page.evaluate(`(${readAffiliate.toString()})('mercadolivre', true)`),
     null,

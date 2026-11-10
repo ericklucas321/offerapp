@@ -189,6 +189,25 @@ export class WhatsAppPublisher {
       await this.sock.sendMessage(destination, { image: { url: imageUrl }, caption: text });
     else await this.sock.sendMessage(destination, { text, linkPreview: true });
   }
+  // Restart the session with the saved credentials (button "Reconectar").
+  async reconnect() {
+    await this.close();
+    this.lastError = null;
+    return this.connect();
+  }
+  // Leave this WhatsApp account and delete the local session (button "Desconectar").
+  async logout() {
+    const socket = this.sock;
+    try {
+      await socket?.logout?.();
+    } catch {
+      /* The phone may already be unlinked. */
+    }
+    await this.close();
+    fs.rmSync(path.join(this.dataDir, 'wa-auth'), { recursive: true, force: true });
+    this.lastError = null;
+    return this.status();
+  }
   close() {
     this.generation++;
     clearTimeout(this.reconnectTimer);

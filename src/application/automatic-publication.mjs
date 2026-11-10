@@ -20,6 +20,12 @@ export class AutomaticPublication {
     this.store.transaction(() => {
       this.store.setSetting('automatic_groups', JSON.stringify(ids));
       this.store.setSetting('automatic_enabled', String(enabled));
+      if (enabled)
+        for (const group of groups)
+          if (group.enabled)
+            this.store
+              .prepare('UPDATE destination_groups SET mode=? WHERE id=?')
+              .run(ids.includes(group.id) ? 'automatic' : 'review', group.id);
       for (const delivery of this.store
         .prepare("SELECT id,destination FROM deliveries WHERE mode='automatic' AND state='queued'")
         .all())

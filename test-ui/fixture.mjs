@@ -20,6 +20,8 @@ export async function startFixture() {
     groups: async () => knownGroups,
     qrDataUrl: async () => null,
     connect: async () => ({ state: 'connected' }),
+    reconnect: async () => ({ state: 'connected' }),
+    logout: async () => ({ state: 'disconnected' }),
     send: async () => {
       throw new Error('External transport forbidden in UI fixture');
     },
@@ -31,6 +33,7 @@ export async function startFixture() {
     base: `http://127.0.0.1:${server.address().port}`,
     store,
     platform,
+    offers,
     async close() {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));

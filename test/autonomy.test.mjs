@@ -186,3 +186,57 @@ test('Testar agora informa a etapa que falhou', (t) => {
   assert.match(report.error, /afiliada/);
   assert.equal(report.steps.at(-1).name, 'open_affiliate');
 });
+
+test('modo por grupo: um controle define revisão ou automático e grupos podem ser removidos', (t) => {
+  const { platform, store } = fixture(t);
+  const known = [
+    { id: '123@g.us', name: 'Casa' },
+    { id: '456@g.us', name: 'Achados' },
+  ];
+  platform.saveGroup({ id: '123@g.us', mode: 'automatic' }, known);
+  platform.saveGroup({ id: '456@g.us', mode: 'review' }, known);
+  platform.saveTopic({ name: 'Casa', keywords: ['cafeteira'], stores: ['mercadolivre'] });
+  assert.deepEqual(platform.topics()[0].groupIds, []);
+  platform.setOperation(true);
+  assert.equal(store.setting('automatic_enabled'), 'true');
+  assert.deepEqual(JSON.parse(store.setting('automatic_groups')), ['123@g.us']);
+  assert.equal(store.setting('publication_paused'), 'false');
+  assert.equal(platform.status().operationEnabled, true);
+  platform.saveGroup({ id: '123@g.us', mode: 'off' }, known);
+  assert.equal(platform.groups().find((g) => g.id === '123@g.us').enabled, 0);
+  assert.equal(store.setting('automatic_enabled'), 'false');
+  platform.deleteGroup('456@g.us');
+  assert.equal(platform.groups().length, 1);
+  platform.setOperation(false);
+  assert.equal(store.setting('search_enabled'), 'false');
+  assert.equal(store.setting('publication_paused'), 'true');
+  platform.deleteTopic(platform.topics()[0].id);
+  assert.equal(platform.topics().length, 0);
+});
+
+test('migração 4 converte grupos ligados, grupos do automático e desligados', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'offer-mig4-'));
+  const store = new Store({ dataDir: dir });
+  store.db.exec(`DELETE FROM schema_migrations WHERE version=4;
+    CREATE TABLE groups_old AS SELECT id,name,enabled,start_minute,end_minute,interval_minutes,revision FROM destination_groups;
+    DROP TABLE destination_groups;
+    ALTER TABLE groups_old RENAME TO destination_groups;
+    INSERT INTO destination_groups VALUES('1@g.us','A',1,480,1320,60,1),('2@g.us','B',1,480,1320,60,1),('3@g.us','C',0,480,1320,60,1);
+    INSERT INTO topics(name,keywords,stores,group_ids) VALUES('T','["x"]','["mercadolivre"]','["1@g.us"]');`);
+  store.setSetting('automatic_groups', '["1@g.us"]');
+  store.close();
+  const migrated = new Store({ dataDir: dir });
+  t.after(() => migrated.close());
+  assert.deepEqual(
+    migrated.db
+      .prepare('SELECT id,mode FROM destination_groups ORDER BY id')
+      .all()
+      .map((g) => [g.id, g.mode]),
+    [
+      ['1@g.us', 'automatic'],
+      ['2@g.us', 'review'],
+      ['3@g.us', 'off'],
+    ],
+  );
+  assert.equal(migrated.db.prepare('SELECT group_ids FROM topics').get().group_ids, '[]');
+});

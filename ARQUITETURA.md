@@ -37,7 +37,9 @@ A extensão MV3 usa pareamento e token local. O servidor valida Host e origem; a
 
 Os adaptadores de Mercado Livre, Amazon e Shopee leem páginas e ferramentas afiliadas visíveis. Falhas de uma oferta não devem suspender toda a loja; bloqueios da conta exigem revalidação.
 
-O painel tem três áreas: Revisar, Envios e Configurações. Atualiza os dados periodicamente, preservando formulários em edição e seleções. Fila e histórico usam paginação por cursor.
+O painel tem três telas: Ofertas (interruptor da operação, encontradas e envios), Canais (WhatsApp e modo de cada grupo) e Configurar (extensão, teste do Mercado Livre e temas). Atualiza os dados a cada 5 segundos, sem sobrescrever um formulário em edição. Os envios usam paginação por cursor.
+
+Cada grupo tem um modo (`off`, `review`, `automatic`, migração 4). A lista do automático é derivada desses modos. O interruptor (`POST /api/platform/operation`) liga a busca, o automático e a fila juntos. Falhas de leitura são classificadas em `Platform.failJob`: só problemas de conta, ou o gerador de afiliado falhando 3 vezes seguidas, suspendem a loja, e `tick()` testa a loja suspensa sozinho a cada ciclo.
 
 ## Verificação
 

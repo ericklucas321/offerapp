@@ -3,224 +3,197 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Offer · Sua operação de ofertas</title>
+    <title>Offer</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <a class="skip" href="#main">Ir para o conteúdo</a>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <a class="brand" href="/" aria-label="Offer, início"
-          ><span class="brand-mark">o.</span><span>offer<span class="brand-dot">.</span></span></a
-        >
-        <p class="nav-label">SUA OPERAÇÃO</p>
-        <nav aria-label="Navegação principal">
-          <button data-section="offers" aria-current="page">
-            <span aria-hidden="true">▤</span> Revisar
-            <span id="reviewCount" class="nav-count">0</span>
-          </button>
-          <button data-section="deliveries"><span aria-hidden="true">↗</span> Envios</button>
-          <button data-section="settings"><span aria-hidden="true">⚙</span> Configurações</button>
-        </nav>
-        <div class="sidebar-bottom">
-          <span class="local-dot"></span> Neste computador<small
-            >Mercado Livre · Amazon · Shopee</small
-          >
-        </div>
-      </aside>
-      <div class="workspace">
-        <header class="topbar">
-          <div>
-            <span id="operationStatus" role="status">Conectando ao Offer…</span
-            ><span id="connectionDetail" class="muted"></span>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Offer, início"
+        ><span class="brand-mark">o.</span><span>offer</span></a
+      >
+      <nav aria-label="Navegação principal">
+        <button data-section="offers" aria-current="page">Ofertas</button>
+        <button data-section="channels">Canais</button>
+        <button data-section="settings">Configurar</button>
+      </nav>
+    </header>
+    <main id="main" tabindex="-1">
+      <section id="offersView" aria-labelledby="offersTitle">
+        <h1 id="offersTitle" class="visually-hidden">Ofertas</h1>
+        <article class="operation" aria-live="polite">
+          <div class="operation-text">
+            <h2>Offer trabalhando sozinho</h2>
+            <p id="operationStatus" class="muted">Carregando…</p>
           </div>
-          <button id="pauseButton" class="secondary small">Envios pausados</button>
-        </header>
-        <main id="main" tabindex="-1">
-          <section id="offersView" aria-labelledby="reviewTitle">
-            <div class="page-heading">
-              <div>
-                <p class="eyebrow">CURADORIA</p>
-                <h1 id="reviewTitle">Boas ofertas começam aqui.</h1>
-                <p>Confira as sugestões, escolha os destinos e aprove o que vale compartilhar.</p>
-              </div>
-              <button id="newManual" class="secondary">＋ Adicionar oferta</button>
-            </div>
-            <div id="setupGuide" class="setup-guide" hidden></div>
-            <div class="summary-grid">
-              <button class="summary-card" data-quick-filter="ready">
-                <span>Prontas para revisar</span><strong id="readyCount">0</strong
-                ><small>Dados e link conferidos <span>↗</span></small>
-              </button>
-              <button class="summary-card" data-quick-filter="pending">
-                <span>Precisam de atenção</span><strong id="pendingCount">0</strong
-                ><small>Resolva antes de aprovar <span>↗</span></small>
-              </button>
-              <button class="summary-card" data-open-queue>
-                <span>Na fila de envios</span><strong id="queueCount">0</strong
-                ><small>Organizadas por grupo <span>↗</span></small>
-              </button>
-            </div>
-            <div class="list-panel">
-              <div class="list-heading">
-                <div>
-                  <h2>Ofertas para revisar</h2>
-                  <span id="listDescription" class="muted"></span>
-                </div>
-                <button id="searchToggle" class="secondary small">Ativar busca contínua</button>
-              </div>
-              <div class="toolbar">
-                <div class="filter-tabs" aria-label="Situação">
-                  <button data-filter="all" aria-pressed="true">Todas</button
-                  ><button data-filter="ready" aria-pressed="false">Prontas</button
-                  ><button data-filter="pending" aria-pressed="false">Pendências</button>
-                </div>
-                <div class="list-filters">
-                  <label class="sr-only" for="searchInput">Buscar produto</label
-                  ><input id="searchInput" type="search" placeholder="Buscar produto…" /><label
-                    class="sr-only"
-                    for="storeFilter"
-                    >Filtrar loja</label
-                  ><select id="storeFilter">
-                    <option value="all">Todas as lojas</option>
-                    <option value="mercadolivre">Mercado Livre</option>
-                    <option value="amazon">Amazon</option>
-                    <option value="shopee">Shopee</option>
-                  </select>
-                </div>
-              </div>
-              <button id="newSuggestions" class="new-suggestions" hidden>
-                Há atualizações. Limpar seleção e atualizar a lista
-              </button>
-              <div class="list-labels">
-                <label class="check"
-                  ><input
-                    id="selectPage"
-                    type="checkbox"
-                    aria-label="Selecionar ofertas prontas desta página"
-                  />
-                  Produto</label
-                ><span>Preço</span><span>Situação e destinos</span><span></span>
-              </div>
-              <div id="offerRows" aria-live="polite">
-                <div class="empty-state">Carregando suas ofertas…</div>
-              </div>
-              <div class="pagination">
-                <span id="pageInfo" class="muted"></span>
-                <div>
-                  <button id="previousPage" class="secondary small">← Anterior</button
-                  ><button id="nextPage" class="secondary small">Próxima →</button>
-                </div>
-              </div>
-            </div>
-            <div class="batch-bar">
-              <div>
-                <strong id="selectionCount">Nenhuma oferta selecionada</strong
-                ><span id="selectionHelp">Selecione as ofertas prontas para revisar o lote.</span>
-              </div>
-              <div>
-                <button id="clearSelection" class="text-button" hidden>Limpar</button
-                ><button id="reviewBatch" disabled>
-                  Revisar lote <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            </div>
-          </section>
-          <section id="deliveriesView" hidden aria-labelledby="deliveriesTitle">
-            <div class="page-heading">
-              <div>
-                <p class="eyebrow">DISTRIBUIÇÃO</p>
-                <h1 id="deliveriesTitle">Cada oferta, no seu tempo.</h1>
-                <p>Horários e intervalos próprios para cada grupo. Sem teto diário de ofertas.</p>
-              </div>
-            </div>
-            <div class="toolbar">
-              <div class="filter-tabs">
-                <button data-delivery-filter="active" aria-pressed="true">Na fila</button
-                ><button data-delivery-filter="attention" aria-pressed="false">
-                  Precisam de atenção</button
-                ><button data-delivery-filter="history" aria-pressed="false">Histórico</button>
-              </div>
-              <label class="sr-only" for="deliveryGroup">Grupo de destino</label
-              ><select id="deliveryGroup">
-                <option value="all">Todos os grupos</option>
-              </select>
-            </div>
-            <div id="deliveryRows" class="list-panel"></div>
-            <div class="pagination">
-              <span id="deliveryPageInfo" class="muted"></span>
-              <div>
-                <button id="deliveryPrevious" class="secondary small">← Anterior</button
-                ><button id="deliveryNext" class="secondary small">Próxima →</button>
-              </div>
-            </div>
-          </section>
-          <section id="settingsView" hidden aria-labelledby="settingsTitle">
-            <div class="page-heading">
-              <div>
-                <p class="eyebrow">DO SEU JEITO</p>
-                <h1 id="settingsTitle">Prepare sua operação.</h1>
-                <p>Conecte suas contas, escolha os temas e defina o ritmo de cada grupo.</p>
-              </div>
-            </div>
-            <div class="settings-tabs" aria-label="Etapas de configuração">
-              <button data-settings-tab="connections" aria-current="step">1. Conexões</button
-              ><button data-settings-tab="groups">2. Grupos</button
-              ><button data-settings-tab="topics">3. Temas e preços</button>
-            </div>
-            <div id="settingsContent"></div>
-          </section>
-        </main>
-        <footer>Offer <span>Você escolhe. O Offer organiza.</span></footer>
-      </div>
-    </div>
-    <dialog id="detailDialog" class="drawer" aria-labelledby="detailTitle">
-      <div class="dialog-heading">
-        <div>
-          <p class="eyebrow">REVISÃO DA OFERTA</p>
-          <h2 id="detailTitle">Conferir oferta</h2>
+          <button
+            id="operationSwitch"
+            class="switch"
+            role="switch"
+            aria-checked="false"
+            aria-describedby="operationStatus"
+          >
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span id="operationLabel">Desligado</span>
+          </button>
+        </article>
+        <ol id="setupSteps" class="setup" hidden></ol>
+        <p id="pausedBanner" class="banner" hidden>
+          <span id="pausedText"></span>
+          <button id="resumeQueue" class="small">Retomar envios</button>
+        </p>
+        <div class="tabs" role="tablist" aria-label="Lista">
+          <button role="tab" data-list="found" aria-selected="true">
+            Encontradas <span id="foundCount" class="count">0</span>
+          </button>
+          <button role="tab" data-list="deliveries" aria-selected="false">Envios</button>
         </div>
-        <button class="icon-button" data-close="detailDialog" aria-label="Fechar detalhes">
-          ×
-        </button>
-      </div>
-      <div id="detailContent"></div>
-    </dialog>
-    <dialog id="batchDialog" aria-labelledby="batchTitle">
-      <div class="dialog-heading">
-        <div>
-          <p class="eyebrow">ÚLTIMA CONFERÊNCIA</p>
-          <h2 id="batchTitle">Revisar lote</h2>
+        <div id="foundList">
+          <div class="list-toolbar">
+            <label class="check"><input id="selectAll" type="checkbox" /> Selecionar prontas</label>
+            <button id="sendSelected" class="small" disabled>Enviar selecionadas</button>
+          </div>
+          <ul id="offerRows" class="rows"></ul>
         </div>
-        <button class="icon-button" data-close="batchDialog" aria-label="Fechar revisão do lote">
-          ×
-        </button>
-      </div>
-      <p id="batchSummary"></p>
-      <div id="batchContent"></div>
-      <p id="batchError" class="inline-error" role="alert" hidden></p>
-      <div class="dialog-actions">
-        <button class="secondary" data-close="batchDialog">Voltar</button
-        ><button id="confirmBatch">Confirmar aprovação</button>
-      </div>
+        <div id="deliveryList" hidden>
+          <ul id="deliveryRows" class="rows"></ul>
+          <button id="moreDeliveries" class="secondary small" hidden>Carregar mais</button>
+        </div>
+      </section>
+
+      <section id="channelsView" aria-labelledby="channelsTitle" hidden>
+        <h1 id="channelsTitle">Canais</h1>
+        <article class="card">
+          <div class="card-head">
+            <h2>WhatsApp</h2>
+            <span id="waBadge" class="badge">—</span>
+          </div>
+          <p id="waText" class="muted"></p>
+          <img id="waQr" class="qr" alt="QR para conectar seu WhatsApp" hidden />
+          <div class="actions">
+            <button id="waConnect">Conectar WhatsApp</button>
+            <button id="waReconnect" class="secondary" hidden>Reconectar</button>
+            <button id="waLogout" class="secondary danger" hidden>Desconectar</button>
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-head">
+            <h2>Grupos</h2>
+            <button id="loadGroups" class="secondary small">Buscar grupos do WhatsApp</button>
+          </div>
+          <p class="muted">
+            Escolha como cada grupo recebe ofertas. <strong>Automático</strong> envia sem pedir
+            confirmação quando o Offer está ligado. <strong>Com revisão</strong> espera você clicar
+            em Enviar.
+          </p>
+          <ul id="groupRows" class="rows"></ul>
+          <div id="availableGroups"></div>
+        </article>
+      </section>
+
+      <section id="settingsView" aria-labelledby="settingsTitle" hidden>
+        <h1 id="settingsTitle">Configurar</h1>
+        <div class="grid">
+          <article class="card">
+            <div class="card-head">
+              <h2>Extensão do navegador</h2>
+              <span id="bridgeBadge" class="badge">—</span>
+            </div>
+            <p class="muted">
+              Use o navegador onde você está logado na sua conta de afiliado do Mercado Livre. A
+              extensão pesquisa e gera os links numa janela minimizada.
+            </p>
+            <div class="actions">
+              <a href="/downloads/browser-extension.zip" class="button secondary" download
+                >Baixar extensão</a
+              >
+              <button id="pairExtension">Conectar extensão</button>
+            </div>
+            <details>
+              <summary>Como instalar ou atualizar</summary>
+              <p>
+                Extraia o ZIP, abra <code>chrome://extensions</code> ou
+                <code>edge://extensions</code> e ative o modo do desenvolvedor. Clique em Carregar
+                sem compactação e selecione a pasta extraída. Depois recarregue esta página e clique
+                em Conectar extensão.
+              </p>
+            </details>
+          </article>
+          <article class="card">
+            <div class="card-head">
+              <h2>Mercado Livre</h2>
+              <span id="storeBadge" class="badge">—</span>
+            </div>
+            <p id="storeText" class="muted"></p>
+            <div class="actions">
+              <button id="runTest">Testar agora</button>
+            </div>
+            <ol id="testSteps" class="steps"></ol>
+            <p class="muted small">Amazon e Shopee: em breve.</p>
+          </article>
+        </div>
+        <article class="card">
+          <div class="card-head">
+            <h2>Temas</h2>
+          </div>
+          <p class="muted">
+            O Offer pesquisa as palavras-chave de cada tema ativo a cada 30 minutos e guarda as
+            ofertas dentro da faixa de preço.
+          </p>
+          <ul id="topicRows" class="rows"></ul>
+          <form id="topicForm" class="topic-form" novalidate>
+            <h3 id="topicFormTitle">Novo tema</h3>
+            <input type="hidden" name="topicId" />
+            <label
+              >Nome<input name="topicName" required maxlength="100" placeholder="Casa"
+            /></label>
+            <label
+              >Palavras-chave (separe por vírgula)<input
+                name="keywords"
+                required
+                placeholder="cafeteira, air fryer"
+            /></label>
+            <div class="row-fields">
+              <label
+                >Preço mínimo (R$)<input name="min" inputmode="decimal" placeholder="0"
+              /></label>
+              <label
+                >Preço máximo (R$)<input name="max" inputmode="decimal" placeholder="sem limite"
+              /></label>
+            </div>
+            <label class="check"><input name="enabled" type="checkbox" checked /> Ativo</label>
+            <p id="topicError" class="error" hidden></p>
+            <div class="actions">
+              <button type="submit">Salvar tema</button>
+              <button id="resetTopic" type="button" class="secondary">Limpar</button>
+            </div>
+          </form>
+        </article>
+      </section>
+    </main>
+
+    <dialog id="sendDialog" aria-labelledby="sendTitle">
+      <form method="dialog" class="dialog">
+        <h2 id="sendTitle">Enviar ofertas</h2>
+        <div id="sendBody"></div>
+        <p id="sendError" class="error" hidden></p>
+        <div class="actions">
+          <button id="confirmSend" type="button">Confirmar envio</button>
+          <button value="cancel" class="secondary">Cancelar</button>
+        </div>
+      </form>
     </dialog>
-    <dialog id="captureDialog" aria-labelledby="captureTitle">
-      <div class="dialog-heading">
-        <h2 id="captureTitle">Conferir captura</h2>
-        <button class="icon-button" data-close="captureDialog" aria-label="Fechar captura">
-          ×
-        </button>
-      </div>
-      <p>Confira os produtos que serão adicionados à revisão.</p>
-      <ul id="capturePreview"></ul>
-      <div class="dialog-actions">
-        <button class="secondary" data-close="captureDialog">Cancelar</button
-        ><button id="confirmCapture">Adicionar à revisão</button>
-      </div>
+    <dialog id="messageDialog" aria-labelledby="messageTitle">
+      <form method="dialog" class="dialog">
+        <h2 id="messageTitle">Mensagem</h2>
+        <pre id="messageText" class="message"></pre>
+        <div class="actions">
+          <button id="copyMessage" type="button" class="secondary">Copiar</button>
+          <button value="close">Fechar</button>
+        </div>
+      </form>
     </dialog>
-    <div id="toast" role="status" hidden>
-      <span id="toastText"></span><button id="closeToast" aria-label="Dispensar mensagem">×</button>
-    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

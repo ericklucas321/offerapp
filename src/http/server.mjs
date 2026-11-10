@@ -9,7 +9,7 @@ const messages = {
   ...importMessages,
   capture_browser_required:
     'Abra o Chrome com a extensão Offer conectada para validar o produto e gerar o link automaticamente.',
-  publication_paused: 'Envios pausados. Retome na barra superior após revisar as ofertas.',
+  publication_paused: 'Os envios estão pausados. Use Retomar envios ou ligue o Offer.',
   publication_evidence_expires_before_schedule:
     'A confirmação de preço e estoque vencerá antes do horário disponível. Aprove menos ofertas por vez ou confira novamente perto do envio.',
   publication_review_required: 'Abra a prévia atual antes de aprovar o envio.',
@@ -17,9 +17,9 @@ const messages = {
     'Os dados, a mensagem ou o grupo mudaram. Confira a prévia atualizada e confirme novamente.',
   publication_confirmation_required: 'Confira a mensagem e confirme a aprovação.',
   publication_not_ready: 'Atualize os dados antes de aprovar.',
-  destination_not_configured: 'Salve um grupo de destino em Configurações.',
+  destination_not_configured: 'Escolha um grupo para receber ofertas em Canais.',
   invalid_whatsapp_group: 'Escolha um grupo da conta conectada.',
-  whatsapp_not_connected: 'Conecte o WhatsApp em Configurações.',
+  whatsapp_not_connected: 'Conecte o WhatsApp em Canais.',
   whatsapp_dependencies_missing: 'Execute INSTALAR.bat para instalar a conexão do WhatsApp.',
   whatsapp_initialization_failed: 'O WhatsApp não iniciou. Tente conectar novamente.',
   affiliate_confirmation_required: 'Confirme que gerou este link na sua conta.',
@@ -235,6 +235,12 @@ export function createServer({
                 : await publisher.groups(),
             ),
           });
+        if (route === '/api/platform/operation')
+          return reply(res, 200, { ok: true, ...platform.setOperation(data.enabled) });
+        if (route === '/api/platform/groups/delete')
+          return reply(res, 200, { ok: true, groups: platform.deleteGroup(data.id) });
+        if (route === '/api/platform/topics/delete')
+          return reply(res, 200, { ok: true, topics: platform.deleteTopic(data.id) });
         if (route === '/api/platform/topics')
           return reply(res, 200, { ok: true, topics: platform.saveTopic(data) });
         if (route === '/api/platform/automatic') {
@@ -269,8 +275,10 @@ export function createServer({
           });
         if (route === '/api/review/preview')
           return reply(res, 200, { ok: true, ...platform.batchPreview(data.selection) });
-        if (route === '/api/review/approve')
+        if (route === '/api/review/approve') {
+          if (data.resume === true) store.setSetting('publication_paused', 'false');
           return reply(res, 200, { ok: true, ...platform.approveBatch(data) });
+        }
         if (route === '/api/review/discard') {
           platform.discard(data);
           return reply(res, 200, { ok: true });
@@ -323,15 +331,10 @@ export function createServer({
         }
         if (route === '/api/whatsapp/connect')
           return reply(res, 200, { ok: true, ...(await publisher.connect()) });
-        if (route === '/api/whatsapp/destination') {
-          const groups = await publisher.groups(),
-            group = groups.find((g) => g.id === data.id);
-          if (!group) throw new Error('invalid_whatsapp_group');
-          return reply(res, 200, {
-            ok: true,
-            destination: store.saveDestination(group.id, group.name),
-          });
-        }
+        if (route === '/api/whatsapp/reconnect')
+          return reply(res, 200, { ok: true, ...(await publisher.reconnect()) });
+        if (route === '/api/whatsapp/logout')
+          return reply(res, 200, { ok: true, ...(await publisher.logout()) });
       }
       return reply(res, 404, {
         ok: false,
