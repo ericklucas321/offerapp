@@ -257,6 +257,11 @@ export function createServer({
           if (data.enabled) platform.tick(true);
           return reply(res, 200, { ok: true, ...platform.status() });
         }
+        if (route === '/api/platform/test')
+          return reply(res, 202, {
+            ok: true,
+            diagnostic: platform.startDiagnostic(data.marketplace || 'mercadolivre'),
+          });
         if (route === '/api/platform/validate')
           return reply(res, 202, {
             ok: true,

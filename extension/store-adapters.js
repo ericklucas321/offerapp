@@ -61,6 +61,7 @@ export function findProducts(marketplace) {
 }
 
 export function readProduct(marketplace) {
+  const fail = (error, code = 'product_read_failed') => ({ error, code });
   const visible = (e) =>
     !!e &&
     e.getBoundingClientRect().width > 0 &&
@@ -74,7 +75,7 @@ export function readProduct(marketplace) {
       text.slice(0, 2000),
     )
   )
-    throw new Error('A loja pediu verificação. Confira o navegador.');
+    return fail('A loja pediu verificação. Confira o navegador.', 'store_verification_required');
   const selectors =
     marketplace === 'amazon'
       ? {
@@ -140,11 +141,17 @@ export function readProduct(marketplace) {
       offer.lowPrice !== undefined ||
       offer.highPrice !== undefined)
   )
-    throw new Error('O produto tem uma faixa de preços. Selecione uma variante antes de validar.');
+    return fail(
+      'O produto tem uma faixa de preços. Selecione uma variante antes de validar.',
+      'source_browser_price_ambiguous',
+    );
   const title = document.querySelector(selectors.title)?.textContent.trim() || schema?.name;
   const priceText = document.querySelector(selectors.price)?.textContent || '';
   if (/cupom|primeira compra|assinante|cart[aã]o|m[eé]li\+/i.test(priceText))
-    throw new Error('Preço condicionado a benefício não confirmado. Confira a oferta.');
+    return fail(
+      'Preço condicionado a benefício não confirmado. Confira a oferta.',
+      'source_browser_price_ambiguous',
+    );
   const match = priceText.match(/R\$\s*([\d.]+),(\d{2})/);
   const schemaCents = offer?.priceCurrency === 'BRL' ? Math.round(Number(offer.price) * 100) : null;
   const domCents = match ? Number(match[1].replaceAll('.', '')) * 100 + Number(match[2]) : null;
@@ -154,7 +161,10 @@ export function readProduct(marketplace) {
     (domCents && schemaCents && domCents !== schemaCents) ||
     /\d+,\d{2}\s*[-–]/.test(priceText)
   )
-    throw new Error('Preço ou variante não confirmados. Esta loja precisa de ajuste na leitura.');
+    return fail(
+      'Preço ou variante não confirmados. Esta loja precisa de ajuste na leitura.',
+      'source_browser_price_ambiguous',
+    );
   const stockText = document.querySelector(selectors.stock)?.textContent || '';
   const buy =
     document.querySelector(selectors.buy) ||
@@ -175,7 +185,7 @@ export function readProduct(marketplace) {
     .map((e) => e.textContent.trim())
     .join(' / ');
   if (marketplace === 'shopee' && /selecionar varia[cç][aã]o/i.test(text))
-    throw new Error('Selecione uma variante antes de validar.');
+    return fail('Selecione uma variante antes de validar.', 'source_browser_identity_unknown');
   const img = document.querySelector(selectors.image);
   const schemaImage =
     typeof schema?.image === 'string'
@@ -196,6 +206,11 @@ export function readProduct(marketplace) {
 }
 
 export function clickAffiliate(marketplace) {
+  const loggedOut = [...document.querySelectorAll('a[href]')].some(
+    (a) =>
+      /\/lgz\/login|\/jms\/[a-z]+\/lgz|\/login(?:[/?]|$)/i.test(a.href) &&
+      /^(entre|entrar|fa[cç]a login)$/i.test(a.textContent.trim()),
+  );
   const visible = (e) =>
     !!e &&
     e.getBoundingClientRect().width > 0 &&
@@ -214,7 +229,15 @@ export function clickAffiliate(marketplace) {
       )) ||
     document.querySelector(containers[marketplace]);
   if (!visible(root))
-    throw new Error('A ferramenta afiliada não está visível. Confira a conta da loja.');
+    return loggedOut
+      ? {
+          error: 'Você não está logado na loja. Entre na sua conta de afiliado no navegador.',
+          code: 'store_login_required',
+        }
+      : {
+          error: 'A ferramenta afiliada não está visível. Confira a conta da loja.',
+          code: 'affiliate_tool_missing',
+        };
   const candidates = [...root.querySelectorAll('button,a,[role="button"]')].filter(visible);
   const button = candidates.find(
     (e) =>
@@ -222,15 +245,17 @@ export function clickAffiliate(marketplace) {
       (root && /gerar link|obter link|compartilhar/i.test(e.textContent)),
   );
   if (!button)
-    throw new Error(
-      'Gerador afiliado não encontrado. Entre na sua conta afiliada e abra a ferramenta da loja.',
-    );
+    return {
+      error:
+        'Gerador afiliado não encontrado. Entre na sua conta afiliada e abra a ferramenta da loja.',
+      code: 'affiliate_tool_missing',
+    };
   button.click();
   return true;
 }
 
 export function closeAffiliate(marketplace) {
-  if (marketplace !== 'mercadolivre') return false;
+  if (marketplace !== 'mercadolivre') return true;
   const visible = (e) =>
     !!e &&
     e.getBoundingClientRect().width > 0 &&
@@ -246,7 +271,10 @@ export function closeAffiliate(marketplace) {
       (e) => visible(e) && /^close$/i.test(e.getAttribute('aria-label') || e.textContent.trim()),
     );
   if (!close)
-    throw new Error('Não foi possível reabrir o gerador afiliado. Confira a aba da loja.');
+    return {
+      error: 'Não foi possível reabrir o gerador afiliado. Confira a aba da loja.',
+      code: 'affiliate_link_timeout',
+    };
   close.click();
   return true;
 }
@@ -289,7 +317,8 @@ export function readAffiliate(marketplace, waiting = false) {
       if (match) return match[0];
     }
   if (waiting) return null;
-  throw new Error(
-    'O gerador não apresentou um link afiliado verificável. Confira a loja no navegador.',
-  );
+  return {
+    error: 'O gerador não apresentou um link afiliado verificável. Confira a loja no navegador.',
+    code: 'affiliate_link_timeout',
+  };
 }

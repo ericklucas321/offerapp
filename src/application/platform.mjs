@@ -11,6 +11,30 @@ const parse = (v) => JSON.parse(v || '[]');
 const requireValue = (condition, message = 'invalid_request') => {
   if (!condition) throw new Error(message);
 };
+// Errors that mean the store account itself needs the user (login, captcha, block).
+export const ACCOUNT_CODES = new Set([
+  'store_verification_required',
+  'store_login_required',
+  'source_browser_login_required',
+  'source_browser_challenge',
+  'source_browser_login_attempt_limit',
+  'source_browser_access_denied',
+]);
+// Affiliate generator failures: one is a product problem, several in a row mean the account.
+const AFFILIATE_CODES = new Set(['affiliate_tool_missing', 'affiliate_link_timeout']);
+const AFFILIATE_STREAK_LIMIT = 3;
+const REFRESH_FAILURE_LIMIT = 3;
+const DEFAULT_PROBE_KEYWORD = 'fone de ouvido bluetooth';
+const cleanSteps = (steps) =>
+  Array.isArray(steps)
+    ? steps.slice(0, 12).map((step) => ({
+        name: String(step?.name || '').slice(0, 40),
+        ok: step?.ok === true,
+        ms: Number.isFinite(step?.ms) ? Math.max(0, Math.round(step.ms)) : 0,
+        ...(step?.detail ? { detail: String(step.detail).slice(0, 200) } : {}),
+        ...(step?.code ? { code: String(step.code).slice(0, 60) } : {}),
+      }))
+    : [];
 
 export class Platform {
   constructor({ store, offers, policy, now = Date.now, publisherReady = () => false }) {
@@ -373,6 +397,7 @@ export class Platform {
     const token = randomBytes(32).toString('hex');
     this.store.setSetting('bridge_extension_id', extensionId);
     this.store.setSetting('bridge_token', token);
+    this.autoConnect();
     return { token };
   }
   authenticate(token) {
@@ -384,6 +409,16 @@ export class Platform {
     )
       return false;
     return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  }
+  // A paired extension is enough to start: the first read confirms the account, and
+  // account problems suspend the store with a clear reason.
+  autoConnect() {
+    if (!/^[a-f0-9]{64}$/.test(this.store.setting('bridge_token', ''))) return;
+    this.store
+      .prepare(
+        "UPDATE store_connections SET state='ready',last_error='' WHERE marketplace='mercadolivre' AND state='unconfigured'",
+      )
+      .run();
   }
   bridgeConnected() {
     const last = Number(this.store.setting('bridge_last_seen', '0'));
@@ -421,6 +456,7 @@ export class Platform {
       bridgeConnected: this.bridgeConnected(),
       nextSearchAt: this.store.setting('next_search_at'),
       lastSearchAt: this.store.setting('last_search_at'),
+      diagnostic: this.diagnostic('mercadolivre'),
       pendingJobs: this.store
         .prepare("SELECT count(*) AS n FROM browser_jobs WHERE state IN ('pending','running')")
         .get().n,
@@ -525,7 +561,7 @@ export class Platform {
     this.expireJobs();
     const job = this.store
       .prepare(
-        "SELECT j.* FROM browser_jobs j JOIN store_connections c ON c.marketplace=j.marketplace WHERE j.state='pending' AND (j.kind='validate' OR c.state='ready') ORDER BY CASE j.kind WHEN 'refresh' THEN 0 WHEN 'validate' THEN 1 ELSE 2 END,j.id LIMIT 1",
+        "SELECT j.* FROM browser_jobs j JOIN store_connections c ON c.marketplace=j.marketplace WHERE j.state='pending' AND (j.kind='validate' OR c.state='ready' OR json_extract(j.payload,'$.diagnostic')=1) ORDER BY CASE j.kind WHEN 'refresh' THEN 0 WHEN 'validate' THEN 1 ELSE 2 END,j.id LIMIT 1",
       )
       .get();
     if (!job) return null;
@@ -549,14 +585,66 @@ export class Platform {
   }
   expireJobs() {
     for (const expired of this.store
-      .prepare("SELECT marketplace FROM browser_jobs WHERE state='running' AND leased_until<?")
+      .prepare("SELECT * FROM browser_jobs WHERE state='running' AND leased_until<?")
       .all(new Date(this.now()).toISOString()))
-      this.suspendStore(expired.marketplace, 'A leitura expirou. Valide a conexão novamente.');
+      this.failJob(expired, {
+        error: 'Tempo de leitura esgotado; a página da loja não respondeu.',
+        code: 'job_timeout',
+      });
+  }
+  // Records a failed read and decides its reach: the product, or the whole store account.
+  failJob(job, result, receiptHash = null) {
+    const reason = String(result.error).slice(0, 300);
+    const code = typeof result.code === 'string' ? result.code : '';
     this.store
-      .prepare(
-        "UPDATE browser_jobs SET state='failed',error='Tempo de leitura esgotado; tente validar a conexão novamente.' WHERE state='running' AND leased_until<?",
-      )
-      .run(new Date(this.now()).toISOString());
+      .prepare("UPDATE browser_jobs SET state='failed',error=?,result=? WHERE id=?")
+      .run(reason, JSON.stringify({ receiptHash, code, steps: cleanSteps(result.steps) }), job.id);
+    const streakKey = `affiliate_failures_${job.marketplace}`;
+    if (ACCOUNT_CODES.has(code)) {
+      this.suspendStore(job.marketplace, reason);
+      return;
+    }
+    if (AFFILIATE_CODES.has(code)) {
+      const streak = Number(this.store.setting(streakKey, '0')) + 1;
+      this.store.setSetting(streakKey, String(streak));
+      if (streak >= AFFILIATE_STREAK_LIMIT) {
+        this.store.setSetting(streakKey, '0');
+        this.suspendStore(
+          job.marketplace,
+          `O gerador de links de afiliado falhou em ${streak} produtos seguidos. Confira se você está logado na conta de afiliado no navegador.`,
+        );
+        return;
+      }
+    }
+    if (job.kind === 'validate') {
+      // A test the user (or the automatic recovery) asked for: report it on the store.
+      this.store
+        .prepare(
+          "UPDATE store_connections SET state='attention',last_error=? WHERE marketplace=? AND state IN ('validating','attention','unconfigured')",
+        )
+        .run(reason, job.marketplace);
+      return;
+    }
+    if (job.kind !== 'refresh' || !job.delivery_id) return;
+    const productOnly = [
+      'source_browser_price_ambiguous',
+      'source_browser_identity_unknown',
+      'stock_confirmation_required',
+      'invalid_price',
+      'product_marketplace_mismatch',
+    ].includes(code);
+    const failuresKey = `refresh_failures_${job.delivery_id}`;
+    const failures = Number(this.store.setting(failuresKey, '0')) + 1;
+    this.store.setSetting(failuresKey, String(failures));
+    if (productOnly || failures >= REFRESH_FAILURE_LIMIT) {
+      this.store.blockDelivery(job.delivery_id, reason);
+      if (productOnly)
+        this.store
+          .prepare(
+            "UPDATE platform_observations SET stock_status='unknown' WHERE (marketplace,product_key,variant) IN (SELECT o.marketplace,o.product_key,o.variant FROM offers o JOIN deliveries d ON d.offer_id=o.id WHERE d.id=?)",
+          )
+          .run(job.delivery_id);
+    }
   }
   completeJob(id, result) {
     requireValue(Number.isSafeInteger(id) && id > 0);
@@ -587,40 +675,34 @@ export class Platform {
     }
     requireValue(job.state === 'running' && Date.parse(job.leased_until) >= this.now());
     if (result.error) {
-      const reason = String(result.error).slice(0, 300);
-      this.store
-        .prepare("UPDATE browser_jobs SET state='failed',error=?,result=? WHERE id=?")
-        .run(reason, JSON.stringify({ receiptHash }), id);
-      const productOnly =
-        ['product', 'refresh'].includes(job.kind) &&
-        [
-          'source_browser_price_ambiguous',
-          'source_browser_identity_unknown',
-          'stock_confirmation_required',
-          'invalid_price',
-          'product_marketplace_mismatch',
-        ].includes(result.code);
-      if (!(job.kind === 'search' && result.code === 'search_read_failed') && !productOnly)
-        this.suspendStore(job.marketplace, reason);
-      if (productOnly && job.kind === 'refresh') {
-        this.store.blockDelivery(job.delivery_id, reason);
-        this.store
-          .prepare(
-            "UPDATE platform_observations SET stock_status='unknown' WHERE (marketplace,product_key,variant) IN (SELECT o.marketplace,o.product_key,o.variant FROM offers o JOIN deliveries d ON d.offer_id=o.id WHERE d.id=?)",
-          )
-          .run(job.delivery_id);
-      }
+      this.failJob(job, result, receiptHash);
       return;
     }
     if (
       ['search', 'product'].includes(job.kind) &&
+      !payload.diagnostic &&
       this.store.setting('search_enabled', 'false') !== 'true'
     ) {
       this.store.prepare("UPDATE browser_jobs SET state='cancelled' WHERE id=?").run(id);
       return;
     }
     this.store.transaction(() => {
-      if (job.kind === 'search') {
+      if (job.kind === 'search' && payload.diagnostic) {
+        requireValue(Array.isArray(result.urls) && result.urls.length <= 20);
+        const [productUrl] = result.urls;
+        if (productUrl) {
+          requireValue(
+            detectMarketplace(productUrl) === job.marketplace &&
+              extractProductKey(job.marketplace, productUrl),
+            'invalid_url',
+          );
+          this.addJob(job.marketplace, 'validate', {
+            productUrl,
+            diagnostic: true,
+            diagnosticOf: job.id,
+          });
+        }
+      } else if (job.kind === 'search') {
         requireValue(Array.isArray(result.urls) && result.urls.length <= 20);
         const topic = this.topics().find((t) => t.id === job.topic_id);
         if (topic?.enabled)
@@ -644,6 +726,7 @@ export class Platform {
           ok: true,
           completedAt: new Date(this.now()).toISOString(),
           receiptHash,
+          steps: cleanSteps(result.steps),
         }),
         id,
       );
@@ -653,6 +736,7 @@ export class Platform {
     const o = result.observation,
       requested = JSON.parse(job.payload).productUrl;
     requireValue(o && o.affiliateObserved === true && typeof o.observedAt === 'string');
+    this.store.setSetting(`affiliate_failures_${job.marketplace}`, '0');
     const age = this.now() - Date.parse(o.observedAt);
     requireValue(
       Number.isFinite(age) &&
@@ -908,16 +992,12 @@ export class Platform {
       if (connection?.state !== 'ready')
         return {
           allowed: false,
-          reason: 'Conexão da loja suspensa; valide novamente em Configurações',
+          reason: connection?.last_error || 'Conexão da loja suspensa; confira em Configurar',
           retryAfterMs: 15000,
         };
-      const recovered =
-        refresh?.state === 'failed' &&
-        connection?.state === 'ready' &&
-        Date.parse(connection.validated_at) > Date.parse(refresh.created_at);
       if (
         !refresh ||
-        recovered ||
+        ['failed', 'cancelled'].includes(refresh.state) ||
         (refresh.state === 'done' &&
           this.now() -
             Date.parse(JSON.parse(refresh.result || '{}').completedAt || refresh.created_at) >
@@ -948,6 +1028,7 @@ export class Platform {
     return this.policy.preflight(job);
   }
   tick(force = false) {
+    this.autoConnect();
     if (!force && this.store.setting('search_enabled', 'false') !== 'true') return;
     if (!force && Date.parse(this.store.setting('next_search_at', '1970-01-01')) > this.now())
       return;
@@ -959,15 +1040,19 @@ export class Platform {
         .get()
     )
       return;
-    let created = 0;
+    let created = 0,
+      probes = 0;
+    const probed = new Set();
     for (const topic of this.topics().filter((t) => t.enabled))
       for (const marketplace of topic.stores) {
-        if (
-          this.store
-            .prepare('SELECT state FROM store_connections WHERE marketplace=?')
-            .get(marketplace)?.state !== 'ready'
-        )
-          continue;
+        const state = this.store
+          .prepare('SELECT state FROM store_connections WHERE marketplace=?')
+          .get(marketplace)?.state;
+        if (state === 'attention' && !probed.has(marketplace)) {
+          probed.add(marketplace);
+          if (this.probe(marketplace, topic.keywords[0])) probes++;
+        }
+        if (state !== 'ready') continue;
         for (const keyword of topic.keywords) {
           this.addJob(
             marketplace,
@@ -978,9 +1063,75 @@ export class Platform {
           created++;
         }
       }
-    if (!created) return;
-    this.store.setSetting('last_search_at', new Date(this.now()).toISOString());
-    this.store.setSetting('next_search_at', new Date(this.now() + 1800000).toISOString());
+    if (created) this.store.setSetting('last_search_at', new Date(this.now()).toISOString());
+    if (created || probes)
+      this.store.setSetting('next_search_at', new Date(this.now() + 1800000).toISOString());
+  }
+  // Automatic recovery: one test read per cycle for a suspended store, without user clicks.
+  probe(marketplace, keyword = DEFAULT_PROBE_KEYWORD) {
+    if (
+      this.store
+        .prepare(
+          "SELECT 1 FROM browser_jobs WHERE marketplace=? AND state IN ('pending','running') AND (kind='validate' OR json_extract(payload,'$.diagnostic')=1)",
+        )
+        .get(marketplace)
+    )
+      return false;
+    const known = this.store
+      .prepare(
+        "SELECT product_url FROM platform_observations WHERE marketplace=? AND stock_status='available' ORDER BY observed_at DESC LIMIT 1",
+      )
+      .get(marketplace);
+    if (known) this.addJob(marketplace, 'validate', { productUrl: known.product_url, probe: true });
+    else this.addJob(marketplace, 'search', { keyword, diagnostic: true });
+    return true;
+  }
+  // "Testar agora": one search and one product, end to end, with every step reported.
+  startDiagnostic(marketplace = 'mercadolivre') {
+    requireValue(Object.hasOwn(STORES, marketplace));
+    requireValue(this.bridgeConnected(), 'capture_browser_required');
+    this.expireJobs();
+    this.store
+      .prepare(
+        "UPDATE browser_jobs SET state='cancelled',error='Novo teste iniciado' WHERE marketplace=? AND state='pending' AND json_extract(payload,'$.diagnostic')=1",
+      )
+      .run(marketplace);
+    const keyword =
+      this.topics().find((t) => t.enabled && t.stores.includes(marketplace))?.keywords[0] ||
+      DEFAULT_PROBE_KEYWORD;
+    const id = this.addJob(marketplace, 'search', { keyword, diagnostic: true });
+    this.store.setSetting(`diagnostic_job_${marketplace}`, String(id));
+    return this.diagnostic(marketplace);
+  }
+  diagnostic(marketplace = 'mercadolivre') {
+    const id = Number(this.store.setting(`diagnostic_job_${marketplace}`, '0'));
+    const search = id && this.store.prepare('SELECT * FROM browser_jobs WHERE id=?').get(id);
+    if (!search) return { state: 'idle', steps: [], error: '' };
+    const product = this.store
+      .prepare(
+        "SELECT * FROM browser_jobs WHERE kind='validate' AND json_extract(payload,'$.diagnosticOf')=? ORDER BY id DESC LIMIT 1",
+      )
+      .get(id);
+    const steps = [search, product]
+      .filter(Boolean)
+      .flatMap((job) => JSON.parse(job.result || '{}').steps || []);
+    const last = product || search;
+    const noResults = !product && search.state === 'done';
+    return {
+      state: noResults
+        ? 'failed'
+        : ['pending', 'running'].includes(last.state)
+          ? 'running'
+          : last.state === 'done'
+            ? 'passed'
+            : 'failed',
+      keyword: JSON.parse(search.payload).keyword,
+      startedAt: search.created_at,
+      steps,
+      error: noResults
+        ? 'A busca não encontrou produtos para testar. Tente outra palavra-chave no tema.'
+        : last.error || '',
+    };
   }
   start() {
     if (!this.timer)

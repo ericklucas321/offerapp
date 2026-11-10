@@ -8,23 +8,54 @@ import {
   readAffiliate,
 } from './store-adapters.js';
 
+const EMPTY_READ = 'A leitura da página não retornou dados. Confira a loja.';
+const coded = (message, code) => Object.assign(new Error(message), { code });
+
+// Each job runs in a dedicated minimized window, so store pages never take the user's focus.
+// Every step is recorded (name, ok, ms, detail) and sent with the result for diagnosis.
 export function createBrowserWorker({
   chromeApi = globalThis.chrome,
   fetchImpl = globalThis.fetch,
   delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   logger = console,
+  clock = () => Date.now(),
 } = {}) {
   let busy = false;
+  let windowId = null;
   const execute = async (tabId, func, args = []) => {
     const results = await chromeApi.scripting.executeScript({ target: { tabId }, func, args });
     if (!results?.length || results[0].result == null || results[0].error)
-      throw new Error('A leitura da página não retornou dados. Confira a loja.');
-    if (results[0].result.error)
-      throw Object.assign(new Error(results[0].result.error), { code: results[0].result.code });
+      throw new Error(EMPTY_READ);
+    if (results[0].result.error) throw coded(results[0].result.error, results[0].result.code);
     return results[0].result;
   };
-  async function page(url, active = false) {
-    const tab = await chromeApi.tabs.create({ url, active });
+  async function workerWindow() {
+    if (!chromeApi.windows?.create) return null;
+    if (windowId !== null)
+      try {
+        await chromeApi.windows.get(windowId);
+        return windowId;
+      } catch {
+        windowId = null;
+      }
+    const created = await chromeApi.windows.create({
+      url: 'about:blank',
+      focused: false,
+      state: 'minimized',
+    });
+    windowId = created.id;
+    return windowId;
+  }
+  async function openTab(url) {
+    let target = null;
+    try {
+      target = await workerWindow();
+    } catch {
+      target = null;
+    }
+    const tab = await chromeApi.tabs.create(
+      target === null ? { url, active: false } : { url, windowId: target, active: true },
+    );
     for (let i = 0; i < 60; i++) {
       if ((await chromeApi.tabs.get(tab.id)).status === 'complete') {
         await delay(1500);
@@ -32,52 +63,68 @@ export function createBrowserWorker({
       }
       await delay(500);
     }
-    throw new Error('A página da loja demorou para abrir. Confira a aba no navegador.');
+    try {
+      await chromeApi.tabs.remove(tab.id);
+    } catch {
+      /* Already closed. */
+    }
+    throw coded(
+      'A página da loja demorou para abrir. Confira a conexão com a internet.',
+      'page_timeout',
+    );
   }
-  async function perform(job) {
+  async function perform(job, steps) {
+    const step = async (name, action) => {
+      const started = clock();
+      try {
+        const value = await action();
+        steps.push({ name, ok: true, ms: clock() - started });
+        return value;
+      } catch (error) {
+        steps.push({
+          name,
+          ok: false,
+          ms: clock() - started,
+          detail: String(webMessages[error.message] || error.message || '').slice(0, 200),
+          ...(error.code || webMessages[error.message]
+            ? { code: error.code || error.message }
+            : {}),
+        });
+        throw error;
+      }
+    };
     const adapter = STORE_ADAPTERS[job.marketplace];
     if (!adapter) throw new Error('Loja não suportada.');
-    const previous =
-      job.kind === 'search'
-        ? (await chromeApi.tabs.query({ active: true, currentWindow: true }))[0]
-        : null;
-    const tabId = await page(
-      job.kind === 'search' ? adapter.search(job.payload.keyword) : job.payload.productUrl,
-      job.kind === 'search',
+    const tabId = await step('open_page', () =>
+      openTab(job.kind === 'search' ? adapter.search(job.payload.keyword) : job.payload.productUrl),
     );
-    let success = false;
     try {
       if (job.kind === 'search') {
-        let urls;
-        for (let attempt = 0; attempt < 30; attempt++) {
-          try {
-            urls = await execute(tabId, findProducts, [job.marketplace]);
-            break;
-          } catch (error) {
-            if (error.message !== 'A leitura da página não retornou dados. Confira a loja.')
-              throw error;
-            if (attempt === 29)
-              throw Object.assign(
-                new Error(
-                  'Os resultados da busca não carregaram em 15 segundos. Confira a aba da loja; as próximas buscas continuam programadas.',
-                ),
-                { code: 'search_read_failed' },
-              );
-            await delay(500);
+        const urls = await step('read_search', async () => {
+          for (let attempt = 0; attempt < 30; attempt++) {
+            try {
+              return await execute(tabId, findProducts, [job.marketplace]);
+            } catch (error) {
+              if (error.message !== EMPTY_READ) throw error;
+              await delay(500);
+            }
           }
-        }
-        success = true;
+          throw coded(
+            'Os resultados da busca não carregaram em 15 segundos. As próximas buscas continuam programadas.',
+            'search_read_failed',
+          );
+        });
         return { urls };
       }
-      let observation;
-      if (job.marketplace === 'mercadolivre') {
-        for (let attempt = 0; attempt < 20; attempt++) {
+      const observation = await step('read_product', async () => {
+        if (job.marketplace !== 'mercadolivre')
+          return execute(tabId, readProduct, [job.marketplace]);
+        for (let attempt = 0; ; attempt++) {
           try {
-            observation = snapshotFromDocument(
+            return snapshotFromDocument(
               await execute(tabId, extractMarketDocument),
               job.payload.productUrl,
             );
-            break;
           } catch (error) {
             if (
               !['source_browser_price_ambiguous', 'source_browser_identity_unknown'].includes(
@@ -89,49 +136,43 @@ export function createBrowserWorker({
             await delay(500);
           }
         }
-      } else observation = await execute(tabId, readProduct, [job.marketplace]);
-      for (let attempt = 0; attempt < 24; attempt++) {
-        try {
-          await execute(tabId, clickAffiliate, [job.marketplace]);
-          break;
-        } catch (error) {
-          if (attempt === 23) throw error;
+      });
+      await step('open_affiliate', async () => {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await execute(tabId, clickAffiliate, [job.marketplace]);
+          } catch (error) {
+            if (attempt === 23 || error.code === 'store_login_required') throw error;
+            await delay(500);
+          }
+        }
+      });
+      const affiliateUrl = await step('read_affiliate', async () => {
+        for (let attempt = 0; attempt < 60; attempt++) {
+          if (attempt === 30 && job.marketplace === 'mercadolivre') {
+            await execute(tabId, closeAffiliate, [job.marketplace]);
+            await delay(500);
+            await execute(tabId, clickAffiliate, [job.marketplace]);
+          }
           await delay(500);
+          try {
+            return await execute(tabId, readAffiliate, [job.marketplace, true]);
+          } catch {
+            /* Generator still loading. */
+          }
         }
-      }
-      let affiliateUrl;
-      for (let attempt = 0; attempt < 60; attempt++) {
-        if (attempt === 30 && job.marketplace === 'mercadolivre') {
-          await execute(tabId, closeAffiliate, [job.marketplace]);
-          await delay(500);
-          await execute(tabId, clickAffiliate, [job.marketplace]);
-        }
-        await delay(500);
-        try {
-          affiliateUrl = await execute(tabId, readAffiliate, [job.marketplace, true]);
-          break;
-        } catch (error) {
-          if (attempt === 59)
-            throw new Error(
-              'O gerador afiliado não terminou de carregar em 30 segundos. Confira a aba da loja e tente novamente.',
-            );
-        }
-      }
-      success = true;
+        throw coded(
+          'O gerador afiliado não terminou de carregar em 30 segundos.',
+          'affiliate_link_timeout',
+        );
+      });
       return { observation: { ...observation, affiliateUrl, affiliateObserved: true } };
     } finally {
-      if (success)
-        try {
-          await chromeApi.tabs.remove(tabId);
-        } catch {
-          /* A tab already closed by the user does not invalidate a completed read. */
-        }
-      if (previous?.id && previous.id !== tabId)
-        try {
-          await chromeApi.tabs.update(previous.id, { active: true });
-        } catch {
-          /* The user may have closed the previous tab. */
-        }
+      try {
+        await chromeApi.tabs.remove(tabId);
+      } catch {
+        /* A tab already closed by the user does not invalidate a completed read. */
+      }
     }
   }
   async function run() {
@@ -162,15 +203,17 @@ export function createBrowserWorker({
       for (let count = 0; count < 5; count++) {
         const { job } = await api('/api/bridge/jobs');
         if (!job) break;
+        const steps = [];
         let result;
         try {
-          result = await perform(job);
+          result = { ...(await perform(job, steps)), steps };
         } catch (error) {
           result = {
             error: webMessages[error.message] || error.message || 'Falha ao consultar a loja.',
             ...(error.code || webMessages[error.message]
               ? { code: error.code || error.message }
               : {}),
+            steps,
           };
         }
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -182,7 +225,20 @@ export function createBrowserWorker({
               if (!result.error)
                 await api('/api/bridge/result', {
                   id: job.id,
-                  result: { error: error.message, ...(error.code ? { code: error.code } : {}) },
+                  result: {
+                    error: error.message,
+                    ...(error.code ? { code: error.code } : {}),
+                    steps: [
+                      ...steps,
+                      {
+                        name: 'save_result',
+                        ok: false,
+                        ms: 0,
+                        detail: error.message,
+                        ...(error.code ? { code: error.code } : {}),
+                      },
+                    ],
+                  },
                 });
               else throw error;
               break;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Offer Machine · Captura Mercado Livre",
-  "version": "0.3.8",
+  "name": "Offer · Mercado Livre",
+  "version": "0.4.0",
   "description": "Captura pontual e conexão com o Offer local para busca, links afiliados e atualização de produtos.",
   "permissions": ["activeTab", "scripting", "storage", "alarms", "tabs"],
   "action": {

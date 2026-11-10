@@ -145,7 +145,10 @@ test('auditoria: suspender loja cancela leituras de produto ainda pendentes', (t
   const id = platform.addJob('mercadolivre', 'search', { keyword: 'teste' });
   platform.addJob('mercadolivre', 'product', { productUrl: url });
   platform.claimJob();
-  platform.completeJob(id, { error: 'Verificação necessária' });
+  platform.completeJob(id, {
+    error: 'Verificação necessária',
+    code: 'store_verification_required',
+  });
   assert.equal(platform.claimJob(), null);
 });
 test('auditoria: captura antiga de vitrine não esconde oferta automática pronta', (t) => {

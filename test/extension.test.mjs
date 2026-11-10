@@ -83,19 +83,44 @@ test('busca aguarda resultados renderizados e preserva o motivo da verificação
   assert.equal(JSON.parse(blocked.stats().bodies[0]).result.code, 'store_verification_required');
 });
 
-test('busca abre aba ativa para renderização da loja e restaura a aba anterior', async () => {
+test('busca roda em janela minimizada dedicada sem roubar o foco e registra as etapas', async () => {
+  const { worker, chromeApi, stats } = workerFixture();
+  const windows = [];
+  let tabOptions;
+  chromeApi.windows = {
+    create: async (options) => {
+      windows.push(options);
+      return { id: 40 };
+    },
+    get: async (id) => ({ id }),
+  };
+  chromeApi.tabs.create = async (options) => {
+    tabOptions = options;
+    return { id: 7 };
+  };
+  await worker.run();
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].state, 'minimized');
+  assert.equal(windows[0].focused, false);
+  assert.equal(tabOptions.windowId, 40);
+  const result = JSON.parse(stats().bodies[0]).result;
+  assert.deepEqual(
+    result.steps.map((s) => [s.name, s.ok]),
+    [
+      ['open_page', true],
+      ['read_search', true],
+    ],
+  );
+});
+test('sem API de janelas a busca abre aba inativa', async () => {
   const { worker, chromeApi } = workerFixture();
-  let active, restored;
+  let active;
   chromeApi.tabs.create = async (options) => {
     active = options.active;
     return { id: 7 };
   };
-  chromeApi.tabs.update = async (id, options) => {
-    if (options.active) restored = id;
-  };
   await worker.run();
-  assert.equal(active, true);
-  assert.equal(restored, 2);
+  assert.equal(active, false);
 });
 
 test('leitura da busca distingue carregamento, verificação, vazio e resultados com anúncio selecionado', (t) => {
@@ -233,7 +258,10 @@ test('extensão reabre uma única vez o gerador travado e mantém o limite quand
       assert.equal(stats().removed, 1);
     } else {
       assert.match(result.error, /30 segundos/);
-      assert.equal(stats().removed, 0);
+      assert.equal(result.code, 'affiliate_link_timeout');
+      assert.deepEqual(result.steps.at(-1).name, 'read_affiliate');
+      assert.equal(result.steps.at(-1).ok, false);
+      assert.equal(stats().removed, 1);
     }
   }
 });
@@ -242,14 +270,26 @@ test('extensão: chamadas simultâneas não abrem trabalhos duplicados', async (
   await Promise.all([worker.run(), worker.run()]);
   assert.equal(stats().created, 1);
 });
-test('extensão: erro de leitura mantém somente sua aba para conferência e informa a falha', async () => {
+test('extensão: erro de leitura fecha a aba, informa a falha e a etapa', async () => {
   const { worker, chromeApi, stats } = workerFixture();
   chromeApi.scripting.executeScript = async () => {
     throw new Error('Verificação necessária');
   };
   await worker.run();
-  assert.equal(stats().removed, 0);
-  assert.match(stats().bodies[0], /Verificação necessária/);
+  assert.equal(stats().removed, 1);
+  const result = JSON.parse(stats().bodies[0]).result;
+  assert.match(result.error, /Verificação necessária/);
+  assert.equal(result.steps.at(-1).name, 'read_search');
+  assert.match(result.steps.at(-1).detail, /Verificação necessária/);
+});
+test('extensão: barra afiliada ausente e sessão deslogada recebem códigos distintos', (t) => {
+  const { element } = documentFixture(t);
+  document.querySelector = () => null;
+  document.querySelectorAll = () => [];
+  assert.equal(clickAffiliate('mercadolivre').code, 'affiliate_tool_missing');
+  const login = { ...element('Entre'), href: 'https://www.mercadolivre.com/jms/mlb/lgz/login?x=1' };
+  document.querySelectorAll = (s) => (s === 'a[href]' ? [login] : []);
+  assert.equal(clickAffiliate('mercadolivre').code, 'store_login_required');
 });
 
 function documentFixture(
@@ -305,7 +345,7 @@ test('leitura: estoque exige botão de compra visível e preço condicionado nã
 });
 test('leitura: cupom no bloco de preço exige conferência', (t) => {
   documentFixture(t, { price: 'R$ 100,00 com cupom' });
-  assert.throws(() => readProduct('amazon'), /benefício não confirmado/);
+  assert.match(readProduct('amazon').error, /benefício não confirmado/);
 });
 test('leitura: schema de outro produto não substitui preço e estoque da página', (t) => {
   documentFixture(t, {
@@ -323,7 +363,7 @@ test('leitura: schema de outro produto não substitui preço e estoque da págin
       },
     },
   });
-  assert.throws(() => readProduct('amazon'), /Preço ou variante/);
+  assert.match(readProduct('amazon').error, /Preço ou variante/);
 });
 test('links: botão Texto fora da ferramenta afiliada não é acionado e link solto é ignorado', (t) => {
   const { element } = documentFixture(t);
@@ -332,9 +372,9 @@ test('links: botão Texto fora da ferramenta afiliada não é acionado e link so
   unrelated.click = () => clicks++;
   document.querySelector = () => null;
   document.querySelectorAll = () => [unrelated];
-  assert.throws(() => clickAffiliate('amazon'), /ferramenta afiliada/);
+  assert.match(clickAffiliate('amazon').error, /ferramenta afiliada/);
   assert.equal(clicks, 0);
   document.querySelectorAll = (s) =>
     s.includes('input,textarea') ? [{ ...element(), value: 'https://amzn.to/unrelated' }] : [];
-  assert.throws(() => readAffiliate('amazon'), /link afiliado verificável/);
+  assert.match(readAffiliate('amazon').error, /link afiliado verificável/);
 });

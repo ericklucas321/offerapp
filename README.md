@@ -8,7 +8,7 @@ Execute `INSTALAR.bat` na primeira instalação e `INICIAR.bat` para abrir o apl
 
 ## Configurar e usar
 
-1. Em **Configurações**, conecte o WhatsApp e a extensão do navegador. A extensão atual é a **0.3.8**: extraia o download, carregue a pasta em `chrome://extensions` ou `edge://extensions` e clique **Conectar extensão** no painel. Depois de atualizar os arquivos, recarregue a extensão.
+1. Em **Configurações**, conecte o WhatsApp e a extensão do navegador. A extensão atual é a **0.4.0**: extraia o download, carregue a pasta em `chrome://extensions` ou `edge://extensions` e clique **Conectar extensão** no painel. Depois de atualizar os arquivos, recarregue a extensão.
 2. Valide cada loja com um produto real, usando sua conta afiliada conectada no navegador.
 3. Escolha os **grupos**, seus horários e o intervalo entre envios. Os horários usam Brasília. Início igual ao fim permite 24 horas.
 4. Defina **temas e preços**: palavras-chave, lojas, faixa de preço e grupos de destino.
