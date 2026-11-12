@@ -12,6 +12,17 @@ const requireValue = (condition, message = 'invalid_request') => {
   if (!condition) throw new Error(message);
 };
 
+// Failures that concern a single product and must not suspend the store connection.
+const PRODUCT_ERROR_CODES = new Set([
+  'source_browser_price_ambiguous',
+  'source_browser_identity_unknown',
+  'stock_confirmation_required',
+  'invalid_price',
+  'product_marketplace_mismatch',
+]);
+// Product and refresh jobs read one product; a validate job tied to a capture does too.
+const isProductJob = (job, payload) =>
+  ['product', 'refresh'].includes(job.kind) || (job.kind === 'validate' && !!payload.captureId);
 export class Platform {
   constructor({ store, offers, policy, now = Date.now, publisherReady = () => false }) {
     Object.assign(this, { store, offers, policy, now });
@@ -156,20 +167,33 @@ export class Platform {
   }
   reviewItems() {
     const groups = this.groups().filter((g) => g.enabled);
-    return this.offers
-      .list({ all: true })
+    const items = this.offers.list({ all: true });
+    // Loaded once per poll (after list(), which may refresh offers) instead of per item or item×group.
+    const offersById = new Map(this.store.listOffers(null).map((o) => [o.id, o]));
+    const discarded = new Set(
+      this.store
+        .prepare(
+          "SELECT key FROM settings WHERE key LIKE 'discard\\_capture\\_%' ESCAPE '\\' AND value='true'",
+        )
+        .all()
+        .map((r) => r.key),
+    );
+    const active = new Set(
+      this.store
+        .prepare(
+          "SELECT offer_id,destination FROM deliveries WHERE state IN ('queued','sending','sent','uncertain')",
+        )
+        .all()
+        .map((d) => `${d.offer_id}|${d.destination}`),
+    );
+    return items
+      .filter((i) => !i.captureId || !discarded.has(`discard_capture_${i.captureId}`))
       .map((i) => {
-        const offer = i.id && this.store.getOffer(i.id);
+        const offer = i.id ? offersById.get(i.id) : undefined;
         const eligibleGroups = offer
           ? groups
               .filter(
-                (g) =>
-                  this.policy.ready(offer, g.id).allowed &&
-                  !this.store
-                    .prepare(
-                      "SELECT 1 FROM deliveries WHERE offer_id=? AND destination=? AND state IN ('queued','sending','sent','uncertain')",
-                    )
-                    .get(offer.id, g.id),
+                (g) => !active.has(`${offer.id}|${g.id}`) && this.policy.ready(offer, g.id).allowed,
               )
               .map((g) => g.id)
           : [];
@@ -205,10 +229,7 @@ export class Platform {
           ready: eligibleGroups.length > 0,
         };
       })
-      .filter((i) => i.ready || !['sent', 'scheduled', 'sending', 'uncertain'].includes(i.state))
-      .filter(
-        (i) => !i.captureId || this.store.setting(`discard_capture_${i.captureId}`) !== 'true',
-      );
+      .filter((i) => i.ready || !['sent', 'scheduled', 'sending', 'uncertain'].includes(i.state));
   }
   batchPreview(selection) {
     requireValue(Array.isArray(selection) && selection.length > 0 && selection.length <= 200);
@@ -333,10 +354,9 @@ export class Platform {
             scheduledAt: at,
           });
           if (delivery.state === 'queued' && !delivery.approved_message) {
-            this.store.approveDelivery(delivery.id, this.store.getOffer(row.offerId));
-            this.store
-              .prepare('UPDATE deliveries SET group_revision=? WHERE id=?')
-              .run(group.revision, delivery.id);
+            this.store.approveDelivery(delivery.id, this.store.getOffer(row.offerId), {
+              groupRevision: group.revision,
+            });
           }
           deliveries.push(delivery.id);
         }
@@ -591,15 +611,7 @@ export class Platform {
       this.store
         .prepare("UPDATE browser_jobs SET state='failed',error=?,result=? WHERE id=?")
         .run(reason, JSON.stringify({ receiptHash }), id);
-      const productOnly =
-        ['product', 'refresh'].includes(job.kind) &&
-        [
-          'source_browser_price_ambiguous',
-          'source_browser_identity_unknown',
-          'stock_confirmation_required',
-          'invalid_price',
-          'product_marketplace_mismatch',
-        ].includes(result.code);
+      const productOnly = isProductJob(job, payload) && PRODUCT_ERROR_CODES.has(result.code);
       if (!(job.kind === 'search' && result.code === 'search_read_failed') && !productOnly)
         this.suspendStore(job.marketplace, reason);
       if (productOnly && job.kind === 'refresh') {
@@ -625,11 +637,12 @@ export class Platform {
         const topic = this.topics().find((t) => t.id === job.topic_id);
         if (topic?.enabled)
           for (const productUrl of new Set(result.urls)) {
-            requireValue(
-              detectMarketplace(productUrl) === job.marketplace &&
-                extractProductKey(job.marketplace, productUrl),
-              'invalid_url',
-            );
+            // One unrecognised link must not discard the search or suspend the store.
+            if (
+              detectMarketplace(productUrl) !== job.marketplace ||
+              !extractProductKey(job.marketplace, productUrl)
+            )
+              continue;
             const exists = this.store
               .prepare(
                 "SELECT 1 FROM browser_jobs WHERE marketplace=? AND payload=? AND topic_id=? AND state IN ('pending','running')",
@@ -902,9 +915,7 @@ export class Platform {
       const refresh =
         job.refresh_job_id &&
         this.store.prepare('SELECT * FROM browser_jobs WHERE id=?').get(job.refresh_job_id);
-      const connection = this.store
-        .prepare('SELECT * FROM store_connections WHERE marketplace=?')
-        .get(job.marketplace);
+      const connection = this.store.connection(job.marketplace);
       if (connection?.state !== 'ready')
         return {
           allowed: false,
@@ -962,12 +973,7 @@ export class Platform {
     let created = 0;
     for (const topic of this.topics().filter((t) => t.enabled))
       for (const marketplace of topic.stores) {
-        if (
-          this.store
-            .prepare('SELECT state FROM store_connections WHERE marketplace=?')
-            .get(marketplace)?.state !== 'ready'
-        )
-          continue;
+        if (this.store.connection(marketplace)?.state !== 'ready') continue;
         for (const keyword of topic.keywords) {
           this.addJob(
             marketplace,

@@ -221,7 +221,11 @@ function selectionState() {
     selectable.some((i) => selected.has(i.id)) && !$('selectPage').checked;
   $('selectPage').disabled = !selectable.length;
 }
+let lastRenderKey = '';
+const productHeader = (item) =>
+  `<div class="detail-product">${image(item.imageUrl)}<div><h3>${esc(item.title)}</h3><strong>${money(item.priceCents)}</strong><small>${esc(names[item.marketplace])} · ${date(item.observedAt)}</small></div></div>`;
 function renderOffers() {
+  lastRenderKey = JSON.stringify([items, view.platform]);
   const all = filtered();
   page = Math.min(page, Math.max(0, Math.ceil(all.length / pageSize) - 1));
   const rows = visibleItems();
@@ -315,6 +319,8 @@ async function refresh(force = false) {
     view = result;
     header();
     if (current === 'offers') {
+      // Everything renderOffers reads from the server; unchanged polls skip the DOM rebuild.
+      const renderKey = JSON.stringify([result.items, result.platform]);
       if (!force && (selected.size || $('detailDialog').open || $('batchDialog').open)) {
         if (JSON.stringify(result.items) !== JSON.stringify(items)) {
           pendingItems = result.items;
@@ -323,7 +329,7 @@ async function refresh(force = false) {
           pendingItems = null;
           $('newSuggestions').hidden = true;
         }
-      } else {
+      } else if (force || renderKey !== lastRenderKey) {
         items = result.items;
         pendingItems = null;
         $('newSuggestions').hidden = true;
@@ -417,7 +423,7 @@ function openCaptureDetail(item, request) {
   const card = item.stage !== 'product';
   $('detailTitle').textContent = card ? 'Validar produto da vitrine' : 'Validar produto capturado';
   $('detailContent').innerHTML = `
-    <div class="detail-product">${image(item.imageUrl)}<div><h3>${esc(item.title)}</h3><strong>${money(item.priceCents)}</strong><small>${esc(names[item.marketplace])} · ${date(item.observedAt)}</small></div></div>
+    ${productHeader(item)}
     <p class="muted">${card ? 'Dados da vitrine ainda não confirmados.' : 'Dados da captura a reconferir.'} O navegador conectado abrirá o produto para conferir preço, disponibilidade e gerar o link da sua conta afiliada.</p>
     <p id="captureResolutionStatus" role="status" aria-live="polite"></p>
     <div class="form-actions"><button id="resolveCapture" disabled>Validar produto e gerar link</button><a href="${safeUrl(item.productUrl)}" target="_blank" rel="noopener">Abrir produto ↗</a></div>
@@ -532,7 +538,7 @@ async function openDetail(item = null, canOpen = null) {
     locked = captured || browser || reconfirmOnly;
   const destinationIds = selected.get(item?.id)?.groupIds || item?.suggestedGroups || [];
   $('detailContent').innerHTML =
-    `${item ? `<div class="detail-product">${image(item.imageUrl)}<div><h3>${esc(item.title)}</h3><strong>${money(item.priceCents)}</strong><small>${esc(names[item.marketplace])} · ${date(item.observedAt)}</small></div></div>${!item.ready ? `<p class="inline-error">${esc(item.reason)}</p>` : ''}` : ''}
+    `${item ? `${productHeader(item)}${!item.ready ? `<p class="inline-error">${esc(item.reason)}</p>` : ''}` : ''}
     ${reconfirmOnly ? '<p class="muted">Esta oferta já teve um envio. Confira novamente preço e estoque para aprovar os destinos restantes. O conteúdo enviado fica preservado.</p>' : ''}
     <form id="detailForm"><label>Link do produto<input name="productUrl" type="url" required value="${esc(item?.productUrl || '')}" ${locked ? 'readonly' : ''}></label><label>Título<input name="title" required maxlength="500" value="${esc(item?.title || '')}" ${reconfirmOnly ? 'readonly' : ''}></label>
     <div class="fields-row"><label class="field-label">Preço em reais<input name="price" inputmode="decimal" required value="${item ? esc((item.priceCents / 100).toFixed(2).replace('.', ',')) : ''}" ${locked ? 'readonly' : ''}></label><label class="field-label">Imagem (opcional)<input name="imageUrl" type="url" value="${esc(item?.imageUrl || '')}" ${locked ? 'readonly' : ''}></label></div>

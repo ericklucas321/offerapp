@@ -15,6 +15,26 @@ function isoNow() {
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
+const couponRules = (offer) => JSON.parse(offer.coupon_rules || 'null');
+// Identity of an offer at a price; equal fingerprints within the window are duplicates.
+function offerFingerprint(marketplace, productKey, variant, priceCents, finalCents, coupon, rules) {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify([
+        marketplace,
+        productKey,
+        variant,
+        priceCents,
+        finalCents,
+        coupon.toUpperCase(),
+        rules,
+      ]),
+    )
+    .digest('hex');
+}
+const DELIVERY_DETAIL_SQL =
+  'SELECT d.*,o.title,o.product_key,o.price_cents FROM deliveries d JOIN offers o ON o.id=d.offer_id';
 
 export class Store {
   constructor({ dataDir = './data', dbName = 'offers.sqlite', scoreWeights = {} } = {}) {
@@ -33,6 +53,9 @@ export class Store {
   migrate() {
     migrate(this.db);
     migratePlatform(this.db);
+    // Indexes for the panel poll: last search result and per-offer delivery lookups.
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_browser_jobs_kind ON browser_jobs(kind,state,id);
+      CREATE INDEX IF NOT EXISTS idx_delivery_offer_state ON deliveries(offer_id,state);`);
   }
 
   prepare(sql) {
@@ -61,9 +84,10 @@ export class Store {
     }
   }
 
+  // CROSS JOIN keeps offers as the outer loop, so only this product's deliveries are read.
   lastPublication(key, variant = '', destination = null, marketplace = null) {
     return this.prepare(
-      `SELECT d.sent_at,COALESCE(d.sent_price_cents,o.final_price_cents,o.price_cents) AS final_price_cents FROM deliveries d JOIN offers o ON o.id=d.offer_id WHERE d.state='sent' AND o.product_key=? AND o.variant=? AND (? IS NULL OR d.destination=?) AND (? IS NULL OR o.marketplace=?) ORDER BY d.sent_at DESC LIMIT 1`,
+      `SELECT d.sent_at,COALESCE(d.sent_price_cents,o.final_price_cents,o.price_cents) AS final_price_cents FROM offers o CROSS JOIN deliveries d ON o.id=d.offer_id WHERE d.state='sent' AND o.product_key=? AND o.variant=? AND (? IS NULL OR d.destination=?) AND (? IS NULL OR o.marketplace=?) ORDER BY d.sent_at DESC LIMIT 1`,
     ).get(key, variant, destination, destination, marketplace, marketplace);
   }
   sentDeliveries(destination = null) {
@@ -72,14 +96,15 @@ export class Store {
     ).all(destination, destination);
   }
   dailyStats(now = Date.now()) {
-    return {
-      day: localClock(now).day,
-      timezone: 'America/Sao_Paulo',
-      sent: this.sentDeliveries().filter(
-        (row) => localClock(Date.parse(row.sent_at)).day === localClock(now).day,
-      ).length,
-      limit: null,
-    };
+    const day = localClock(now).day;
+    // 48h is a superset of any local day; the exact day is still decided by localClock.
+    const since = new Date(now - 48 * 3600_000).toISOString();
+    const sent = this.prepare(
+      "SELECT sent_at FROM deliveries WHERE state='sent' AND sent_at IS NOT NULL AND sent_at>=?",
+    )
+      .all(since)
+      .filter((row) => localClock(Date.parse(row.sent_at)).day === day).length;
+    return { day, timezone: 'America/Sao_Paulo', sent, limit: null };
   }
   cancelDelivery(id) {
     const row = this.prepare('SELECT * FROM deliveries WHERE id=?').get(Number(id));
@@ -100,7 +125,7 @@ export class Store {
       price: offer.price_cents / 100,
       oldPrice: offer.old_price_cents == null ? null : offer.old_price_cents / 100,
       coupon: offer.coupon,
-      couponRules: JSON.parse(offer.coupon_rules || 'null'),
+      couponRules: couponRules(offer),
       note: offer.note,
       imageUrl: offer.image_url,
       variant: offer.variant,
@@ -123,20 +148,15 @@ export class Store {
     )
       throw new Error('offer_identity_locked');
     const coupon = couponPrice(normalized.priceCents, normalized.coupon, normalized.couponRules);
-    const fingerprint = crypto
-      .createHash('sha256')
-      .update(
-        JSON.stringify([
-          normalized.marketplace,
-          normalized.productKey,
-          normalized.variant,
-          normalized.priceCents,
-          coupon.final,
-          normalized.coupon.toUpperCase(),
-          normalized.couponRules,
-        ]),
-      )
-      .digest('hex');
+    const fingerprint = offerFingerprint(
+      normalized.marketplace,
+      normalized.productKey,
+      normalized.variant,
+      normalized.priceCents,
+      coupon.final,
+      normalized.coupon,
+      normalized.couponRules,
+    );
     if (
       this.prepare('SELECT id FROM offers WHERE fingerprint=? AND id!=? AND created_at>=?').get(
         fingerprint,
@@ -206,6 +226,13 @@ export class Store {
     this.event('delivery_manual_retry', null, { deliveryId: Number(id) });
   }
 
+  group(id) {
+    return this.prepare('SELECT * FROM destination_groups WHERE id=?').get(id);
+  }
+  connection(marketplace) {
+    return this.prepare('SELECT * FROM store_connections WHERE marketplace=?').get(marketplace);
+  }
+
   setting(key, fallback = '') {
     return this.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value ?? fallback;
   }
@@ -244,20 +271,15 @@ export class Store {
     offer.finalPriceCents = coupon.final;
     const history = this.history(offer.marketplace, offer.productKey, offer.variant);
     const evaluation = scoreOffer(offer, history, this.scoreWeights);
-    const fingerprint = crypto
-      .createHash('sha256')
-      .update(
-        JSON.stringify([
-          offer.marketplace,
-          offer.productKey,
-          offer.variant,
-          offer.priceCents,
-          coupon.final,
-          offer.coupon.toUpperCase(),
-          offer.couponRules,
-        ]),
-      )
-      .digest('hex');
+    const fingerprint = offerFingerprint(
+      offer.marketplace,
+      offer.productKey,
+      offer.variant,
+      offer.priceCents,
+      coupon.final,
+      offer.coupon,
+      offer.couponRules,
+    );
     const now = isoNow();
     const ownTransaction = !this.db.isTransaction;
     if (ownTransaction) this.db.exec('BEGIN IMMEDIATE');
@@ -337,7 +359,7 @@ export class Store {
       offer.affiliate_validation === 'product_id_match'
     )
       throw new Error('affiliate_revalidation_required');
-    const rules = JSON.parse(offer.coupon_rules || 'null');
+    const rules = couponRules(offer);
     couponPrice(offer.price_cents, offer.coupon, rules);
     const existing = this.prepare(
       "SELECT * FROM deliveries WHERE offer_id=? AND destination=? AND state IN ('queued','sending','sent','uncertain') ORDER BY id DESC LIMIT 1",
@@ -402,6 +424,13 @@ export class Store {
       'SELECT * FROM browser_import_drafts ORDER BY observed_at DESC,id DESC LIMIT ?',
     ).all(limit === null ? -1 : limit);
   }
+  // Same numbers as reading captures() for the 200 newest rows, without loading them.
+  captureSummary() {
+    const row = this.prepare(
+      "SELECT count(*) AS captures,max(observed_at) AS lastCaptureAt,COALESCE(sum(stage='product'),0) AS productCaptures FROM (SELECT observed_at,stage FROM browser_import_drafts ORDER BY observed_at DESC,id DESC LIMIT 200)",
+    ).get();
+    return { ...row, lastCaptureAt: row.lastCaptureAt || null };
+  }
   importCaptures(items) {
     this.transaction(() => {
       for (const item of items) this.saveCapture(item);
@@ -450,9 +479,9 @@ export class Store {
       id,
     );
   }
-  approveDelivery(id, offer) {
+  approveDelivery(id, offer, { groupRevision = null, defaultDestination } = {}) {
     this.prepare(
-      'UPDATE deliveries SET approved_price_cents=?,approved_message=?,approved_metadata=? WHERE id=?',
+      'UPDATE deliveries SET approved_price_cents=?,approved_message=?,approved_metadata=?,group_revision=COALESCE(?,group_revision) WHERE id=?',
     ).run(
       offer.price_cents,
       this.messageFor(offer),
@@ -466,28 +495,25 @@ export class Store {
         image: offer.image_url,
         priceCondition: this.evidenceFor(offer)?.price_condition || '',
         captureId: offer.capture_id,
+        ...(defaultDestination === undefined ? {} : { defaultDestination }),
       }),
+      groupRevision,
       id,
     );
   }
   updateCapturePrice(id, capture) {
     const offer = this.getOffer(id);
-    const rules = JSON.parse(offer.coupon_rules || 'null');
+    const rules = couponRules(offer);
     const coupon = couponPrice(capture.price_cents, offer.coupon, rules);
-    const fingerprint = crypto
-      .createHash('sha256')
-      .update(
-        JSON.stringify([
-          offer.marketplace,
-          offer.product_key,
-          offer.variant,
-          capture.price_cents,
-          coupon.final,
-          offer.coupon.toUpperCase(),
-          rules,
-        ]),
-      )
-      .digest('hex');
+    const fingerprint = offerFingerprint(
+      offer.marketplace,
+      offer.product_key,
+      offer.variant,
+      capture.price_cents,
+      coupon.final,
+      offer.coupon,
+      rules,
+    );
     this.prepare(
       'UPDATE offers SET price_cents=?,final_price_cents=?,fingerprint=?,verified_at=?,stock_status=?,coupon_condition=? WHERE id=?',
     ).run(
@@ -502,9 +528,10 @@ export class Store {
     return this.getOffer(id);
   }
   deliveryDetails() {
-    return this.prepare(
-      `SELECT d.*,o.title,o.product_key,o.price_cents FROM deliveries d JOIN offers o ON o.id=d.offer_id ORDER BY d.id DESC LIMIT 200`,
-    ).all();
+    return this.prepare(`${DELIVERY_DETAIL_SQL} ORDER BY d.id DESC LIMIT 200`).all();
+  }
+  deliveryDetail(id) {
+    return this.prepare(`${DELIVERY_DETAIL_SQL} WHERE d.id=?`).get(Number(id));
   }
   deliveryPage({ filter = 'all', destination = null, before = null, limit = 50 } = {}) {
     const states = {
@@ -528,7 +555,7 @@ export class Store {
       `SELECT count(*) AS n FROM deliveries d WHERE d.state IN (${stateSql}) AND (? IS NULL OR d.destination=?)`,
     ).get(...values).n;
     const rows = this.prepare(
-      `SELECT d.*,o.title,o.product_key,o.price_cents FROM deliveries d JOIN offers o ON o.id=d.offer_id WHERE d.state IN (${stateSql}) AND (? IS NULL OR d.destination=?) AND (? IS NULL OR d.id<?) ORDER BY d.id DESC LIMIT ?`,
+      `${DELIVERY_DETAIL_SQL} WHERE d.state IN (${stateSql}) AND (? IS NULL OR d.destination=?) AND (? IS NULL OR d.id<?) ORDER BY d.id DESC LIMIT ?`,
     ).all(...values, before, before, limit + 1);
     const hasMore = rows.length > limit;
     if (hasMore) rows.pop();
@@ -597,11 +624,7 @@ export class Store {
   messageFor(offer, { includePrice = false } = {}) {
     let computed;
     try {
-      computed = couponPrice(
-        offer.price_cents,
-        offer.coupon,
-        JSON.parse(offer.coupon_rules || 'null'),
-      );
+      computed = couponPrice(offer.price_cents, offer.coupon, couponRules(offer));
     } catch (error) {
       if (error.message !== 'coupon_expired') throw error;
       computed = {

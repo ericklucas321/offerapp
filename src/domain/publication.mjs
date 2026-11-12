@@ -76,12 +76,7 @@ export class PublicationPolicy {
     Object.assign(this, { store, now });
   }
   ready(offer, destination = null) {
-    if (
-      offer?.source === 'browser' &&
-      this.store
-        .prepare('SELECT state FROM store_connections WHERE marketplace=?')
-        .get(offer.marketplace)?.state !== 'ready'
-    )
+    if (offer?.source === 'browser' && this.store.connection(offer.marketplace)?.state !== 'ready')
       return {
         allowed: false,
         reason: 'Conexão da loja suspensa; valide novamente em Configurações',
@@ -118,13 +113,10 @@ export class PublicationPolicy {
       this.store.blockDelivery(job.delivery_id, reason);
       return { allowed: false, reason };
     };
-    const group = this.store
-      .prepare('SELECT * FROM destination_groups WHERE id=?')
-      .get(job.delivery_destination);
+    const group = this.store.group(job.delivery_destination);
     if (
       !group?.enabled ||
-      (job.group_revision != null &&
-        (!group || !group.enabled || group.revision !== job.group_revision)) ||
+      (job.group_revision != null && group.revision !== job.group_revision) ||
       (job.group_revision == null &&
         job.delivery_destination !== this.store.setting('whatsapp_group_id'))
     )

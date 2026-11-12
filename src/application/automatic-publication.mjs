@@ -71,10 +71,7 @@ export class AutomaticPublication {
             mode: 'automatic',
             scheduledAt: new Date(this.now()).toISOString(),
           });
-          this.store.approveDelivery(delivery.id, offer);
-          this.store
-            .prepare('UPDATE deliveries SET group_revision=? WHERE id=?')
-            .run(group.revision, delivery.id);
+          this.store.approveDelivery(delivery.id, offer, { groupRevision: group.revision });
           this.store.event('automatic_offer_scheduled', offer.id, {
             deliveryId: delivery.id,
             destination: group.id,

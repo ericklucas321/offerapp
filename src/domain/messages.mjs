@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { selectedItemId } from '../shared/market-parser.mjs';
 const MARKETPLACES = Object.freeze({
   mercadolivre: {
     label: 'Mercado Livre',
@@ -46,7 +47,7 @@ export function extractProductKey(marketplace, url) {
   const text = `${u.pathname}${u.search}`;
 
   if (marketplace === 'mercadolivre') {
-    const selected = u.searchParams.get('wid') || new URLSearchParams(u.hash.slice(1)).get('wid');
+    const selected = selectedItemId(u);
     if (/^MLB[0-9]{6,}$/i.test(selected || '')) return selected.toUpperCase();
     const mlb = text.match(/\bMLB[-_]?([0-9]{6,})\b/i);
     if (mlb) return `MLB${mlb[1]}`.toUpperCase();

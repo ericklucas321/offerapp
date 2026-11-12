@@ -154,11 +154,11 @@ export function createServer({
         return res.end(fs.readFileSync(path.join(root, 'public', name)));
       }
       const state = async (section) => {
-        const captures = store.captures();
+        const platformStatus = platform.status();
         return {
           ok: true,
           version: VERSION,
-          platform: platform.status(),
+          platform: platformStatus,
           whatsapp: {
             ...publisher.status(),
             ...(section === 'settings' ? { qrDataUrl: await publisher.qrDataUrl() } : {}),
@@ -168,15 +168,11 @@ export function createServer({
             name: store.setting('whatsapp_group_name'),
           },
           publicationPaused: store.setting('publication_paused', 'true') === 'true',
-          automatic: platform.status().automaticEnabled,
+          automatic: platformStatus.automaticEnabled,
           queue: store.queueStats(),
           daily: store.dailyStats(),
           rules: RULES,
-          extension: {
-            captures: captures.length,
-            lastCaptureAt: captures[0]?.observed_at || null,
-            productCaptures: captures.filter((c) => c.stage === 'product').length,
-          },
+          extension: store.captureSummary(),
           ...(section === 'offers' ? { items: platform.reviewItems() } : {}),
           ...(section === 'deliveries' ? deliveryPage() : {}),
         };

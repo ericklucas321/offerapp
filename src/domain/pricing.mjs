@@ -1,4 +1,12 @@
 import { toCents } from './messages.mjs';
+// Intl formatters are costly to build and couponPrice runs for every rendered message.
+const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const brl = (cents) => BRL.format(cents / 100);
+const BRASILIA = new Intl.DateTimeFormat('pt-BR', {
+  timeZone: 'America/Sao_Paulo',
+  dateStyle: 'short',
+  timeStyle: 'short',
+});
 export function couponPrice(priceCents, code, rules, now = Date.now()) {
   if (!code || !rules)
     return {
@@ -13,31 +21,28 @@ export function couponPrice(priceCents, code, rules, now = Date.now()) {
     (type === 'percent' && Number(value) > 100)
   )
     throw new Error('invalid_coupon');
+  const minCents = toCents(minimum);
+  const maxCents = maximum == null ? null : toCents(maximum);
   if (
-    !Number.isFinite(toCents(minimum)) ||
-    toCents(minimum) < 0 ||
-    (maximum != null && (!Number.isFinite(toCents(maximum)) || toCents(maximum) <= 0))
+    !Number.isFinite(minCents) ||
+    minCents < 0 ||
+    (maxCents != null && (!Number.isFinite(maxCents) || maxCents <= 0))
   )
     throw new Error('invalid_coupon');
   if (expiresAt && !Number.isFinite(Date.parse(expiresAt))) throw new Error('invalid_coupon');
   if (expiresAt && Date.parse(expiresAt) <= now) throw new Error('coupon_expired');
-  if (priceCents < toCents(minimum))
+  if (priceCents < minCents)
     return {
       final: priceCents,
-      condition: `Cupom não aplicado: esta oferta está abaixo da compra mínima de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(toCents(minimum) / 100)}.`,
+      condition: `Cupom não aplicado: esta oferta está abaixo da compra mínima de ${brl(minCents)}.`,
     };
   let discount =
     type === 'percent' ? Math.round((priceCents * Number(value)) / 100) : toCents(value);
-  if (maximum != null) discount = Math.min(discount, toCents(maximum));
-  const brl = (cents) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
+  if (maxCents != null) discount = Math.min(discount, maxCents);
   const details = [];
-  if (toCents(minimum) > 0) details.push(`Compra mínima: ${brl(toCents(minimum))}.`);
-  if (maximum != null) details.push(`Desconto limitado a ${brl(toCents(maximum))}.`);
-  if (expiresAt)
-    details.push(
-      `Válido até ${new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' }).format(new Date(expiresAt))} (Brasília).`,
-    );
+  if (minCents > 0) details.push(`Compra mínima: ${brl(minCents)}.`);
+  if (maxCents != null) details.push(`Desconto limitado a ${brl(maxCents)}.`);
+  if (expiresAt) details.push(`Válido até ${BRASILIA.format(new Date(expiresAt))} (Brasília).`);
   if (rules.conditions) details.push(String(rules.conditions).trim());
   details.push('Sujeito à elegibilidade e disponibilidade no checkout.');
   return { final: Math.max(0, priceCents - discount), condition: details.join(' ') };

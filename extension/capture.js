@@ -38,14 +38,18 @@ export function marketUrl(raw) {
     throw new CaptureError('source_invalid_product');
   return u;
 }
+// Mercado Livre item chosen inside a catalog link: wid, fragment wid, then pdp_filters item_id.
+export function selectedItemId(u) {
+  return (
+    u.searchParams.get('wid') ||
+    new URLSearchParams(u.hash.slice(1)).get('wid') ||
+    u.searchParams.get('pdp_filters')?.match(/(?:^|\|)item_id:(MLB\d+)(?:\||$)/i)?.[1]
+  );
+}
 export function listingId(raw) {
   try {
-    const u = marketUrl(raw),
-      fragment = new URLSearchParams(u.hash.slice(1));
-    const selected =
-      u.searchParams.get('wid') ||
-      fragment.get('wid') ||
-      u.searchParams.get('pdp_filters')?.match(/(?:^|\|)item_id:(MLB\d+)(?:\||$)/)?.[1];
+    const u = marketUrl(raw);
+    const selected = selectedItemId(u);
     if (/^MLB\d+$/.test(selected || '')) return selected;
     if (u.pathname.includes('/p/')) return null;
     return (

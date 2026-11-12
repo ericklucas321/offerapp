@@ -13,6 +13,12 @@ export function createQueueWorker({
   let stopped = false;
   const idleWaiters = [];
 
+  // Postpones a delivery that is not allowed yet; returns true when it did.
+  function deferred(job, check) {
+    if (check.allowed) return false;
+    store.deferDelivery(job.delivery_id, check.reason, check.retryAfterMs ?? 15000);
+    return true;
+  }
   async function tick() {
     if (busy || stopped) return;
     busy = true;
@@ -21,22 +27,13 @@ export function createQueueWorker({
       if (publisher.isReady && !publisher.isReady()) return;
       const job = store.nextDelivery();
       if (!job) return;
-      {
-        const check = await preflight(job);
-        if (!check.allowed) {
-          store.deferDelivery(job.delivery_id, check.reason, check.retryAfterMs ?? 15000);
-          return;
-        }
-      }
+      if (deferred(job, await preflight(job))) return;
       if (store.setting('publication_paused', 'false') === 'true') return;
       if (stopped) return;
       if (finalCheck) {
         const check = finalCheck(job);
         if (check?.then) throw new Error('publication_final_check_must_be_synchronous');
-        if (!check.allowed) {
-          store.deferDelivery(job.delivery_id, check.reason, check.retryAfterMs ?? 15000);
-          return;
-        }
+        if (deferred(job, check)) return;
       }
       if (!store.markSending(job.delivery_id)) return;
       let sendStarted = false;

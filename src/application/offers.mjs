@@ -4,6 +4,13 @@ import { captureStock, validateBrowserCapture } from '../shared/capture-contract
 import { nextPublicationAt, assertEvidenceAtSchedule } from '../domain/publication.mjs';
 import { RULES } from '../domain/rules.mjs';
 import { detectMarketplace, normalizeOfferInput } from '../domain/messages.mjs';
+const DELIVERY_ITEM_STATE = Object.freeze({
+  queued: 'scheduled',
+  sending: 'sending',
+  uncertain: 'uncertain',
+  sent: 'sent',
+  failed: 'failed',
+});
 export class Offers {
   constructor({ store, policy, env = {}, now = Date.now }) {
     Object.assign(this, { store, policy, env, now });
@@ -105,9 +112,7 @@ export class Offers {
     const destination = {
       id: this.store.setting('whatsapp_group_id'),
       name: this.store.setting('whatsapp_group_name'),
-      revision: this.store
-        .prepare('SELECT revision FROM destination_groups WHERE id=?')
-        .get(this.store.setting('whatsapp_group_id'))?.revision,
+      revision: this.store.group(this.store.setting('whatsapp_group_id'))?.revision,
     };
     const reviewToken = createHash('sha256')
       .update(
@@ -136,9 +141,7 @@ export class Offers {
       throw new Error('publication_paused');
     const destination = this.store.setting('whatsapp_group_id');
     if (!destination.endsWith('@g.us')) throw new Error('destination_not_configured');
-    const group = this.store
-      .prepare('SELECT * FROM destination_groups WHERE id=?')
-      .get(destination);
+    const group = this.store.group(destination);
     if (!group?.enabled) throw new Error('publication_not_ready');
     const reviewed = this.preview(id);
     if (!reviewToken) throw new Error('publication_review_required');
@@ -164,23 +167,12 @@ export class Offers {
       mode: 'approved',
       scheduledAt: at,
     });
-    if (delivery.state === 'queued') {
-      this.store.approveDelivery(delivery.id, offer);
-      const approved = this.store
-        .prepare('SELECT approved_metadata FROM deliveries WHERE id=?')
-        .get(delivery.id);
-      this.store
-        .prepare('UPDATE deliveries SET group_revision=?,approved_metadata=? WHERE id=?')
-        .run(
-          group.revision,
-          JSON.stringify({
-            ...JSON.parse(approved.approved_metadata),
-            defaultDestination: destination,
-          }),
-          delivery.id,
-        );
-    }
-    return this.store.deliveryDetails().find((d) => d.id === delivery.id);
+    if (delivery.state === 'queued')
+      this.store.approveDelivery(delivery.id, offer, {
+        groupRevision: group.revision,
+        defaultDestination: destination,
+      });
+    return this.store.deliveryDetail(delivery.id);
   }
   list({ all = false } = {}) {
     const offers = this.store.listOffers(all ? null : 200),
@@ -216,20 +208,7 @@ export class Offers {
                     ? 'Atualize a captura'
                     : 'Gere o link pelo navegador conectado',
           };
-      const state =
-        delivery?.state === 'queued'
-          ? 'scheduled'
-          : delivery?.state === 'sending'
-            ? 'sending'
-            : delivery?.state === 'uncertain'
-              ? 'uncertain'
-              : delivery?.state === 'sent'
-                ? 'sent'
-                : delivery?.state === 'failed'
-                  ? 'failed'
-                  : check.allowed
-                    ? 'ready'
-                    : 'pending';
+      const state = DELIVERY_ITEM_STATE[delivery?.state] ?? (check.allowed ? 'ready' : 'pending');
       return {
         id: offer?.id || null,
         captureId: c?.id || null,
